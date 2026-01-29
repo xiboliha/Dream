@@ -1,0 +1,63 @@
+# 内容安全过滤配置
+
+# 敏感词过滤
+sensitive_words:
+  # 政治敏感
+  political: []
+
+  # 色情内容
+  adult:
+    - enabled: true
+    - action: block
+
+  # 暴力内容
+  violence:
+    - enabled: true
+    - action: warn
+
+  # 违法内容
+  illegal:
+    - enabled: true
+    - action: block
+
+# 输入验证规则
+input_validation:
+  max_length: 2000
+  min_length: 1
+  allow_urls: false
+  allow_phone_numbers: false
+  allow_email: false
+
+# 输出过滤规则
+output_filtering:
+  remove_personal_info: true
+  remove_urls: false
+  max_response_length: 1000
+
+# 话题限制
+topic_restrictions:
+  blocked_topics:
+    - 自杀
+    - 自残
+    - 毒品
+    - 赌博
+  warning_topics:
+    - 医疗建议
+    - 法律建议
+    - 金融投资
+  redirect_message: "这个话题我不太方便讨论，我们聊点别的好吗？"
+
+# 心理健康保护
+mental_health:
+  crisis_keywords:
+    - 不想活
+    - 想死
+    - 自杀
+    - 结束生命
+  crisis_response: |
+    我很担心你现在的状态。如果你正在经历困难，请记住你并不孤单。
+    建议你联系专业的心理援助热线：
+    - 全国心理援助热线：400-161-9995
+    - 北京心理危机研究与干预中心：010-82951332
+    - 生命热线：400-821-1215
+    请照顾好自己，我会一直在这里陪伴你。

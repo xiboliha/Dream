@@ -1,0 +1,62 @@
+# 频率限制配置
+
+# 全局限制
+global:
+  enabled: true
+
+# 消息频率限制
+message_rate:
+  # 每分钟最大消息数
+  per_minute: 30
+  # 每小时最大消息数
+  per_hour: 200
+  # 每天最大消息数
+  per_day: 1000
+
+  # 超限响应
+  exceeded_response: "你发消息太快啦，让我喘口气~"
+
+# 特殊操作限制
+special_operations:
+  # 记忆查询
+  memory_query:
+    per_minute: 10
+    per_hour: 50
+
+  # AI调用
+  ai_call:
+    per_minute: 20
+    per_hour: 150
+
+  # 图片处理
+  image_process:
+    per_minute: 5
+    per_hour: 30
+
+# 冷却时间（秒）
+cooldown:
+  # 连续消息间隔
+  message_interval: 1
+  # 相同内容重复发送
+  duplicate_content: 60
+  # 错误重试
+  error_retry: 5
+
+# 惩罚机制
+penalty:
+  # 警告阈值
+  warning_threshold: 3
+  # 临时封禁阈值
+  temp_ban_threshold: 5
+  # 临时封禁时长（秒）
+  temp_ban_duration: 300
+
+# 白名单
+whitelist:
+  enabled: false
+  users: []
+
+# 黑名单
+blacklist:
+  enabled: true
+  users: []

@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  aigf:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ai-girlfriend-agent
+    restart: unless-stopped
+    volumes:
+      - ../data:/app/data
+      - ../.env:/app/.env:ro
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./data/database/aigf.db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - aigf-network
+    # For WeChat QR code scanning, you may need to run interactively first
+    # docker-compose run --rm aigf python src/main.py
+    stdin_open: true
+    tty: true
+
+  redis:
+    image: redis:7-alpine
+    container_name: aigf-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - aigf-network
+    command: redis-server --appendonly yes
+
+  # Optional: Web admin interface (future)
+  # web:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile
+  #   container_name: aigf-web
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - ENVIRONMENT=production
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - aigf-network
+  #   command: uvicorn src.app:app --host 0.0.0.0 --port 8000
+
+networks:
+  aigf-network:
+    driver: bridge
+
+volumes:
+  redis-data:
