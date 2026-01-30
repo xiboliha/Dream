@@ -484,6 +484,70 @@ async def search_dialogues(query: str, top_k: int = 5, threshold: float = 0.5):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============ 日志监控 API ============
+
+@app.get("/logs")
+async def get_logs(limit: int = 100, level: Optional[str] = None):
+    """获取最近的日志记录。"""
+    from src.utils.logger import get_log_store
+
+    log_store = get_log_store()
+    logs = log_store.get_logs(limit=limit, level=level)
+
+    return {
+        "count": len(logs),
+        "logs": logs,
+    }
+
+
+@app.get("/logs/chats")
+async def get_chat_logs(limit: int = 50):
+    """获取最近的对话日志。"""
+    from src.utils.logger import get_log_store
+
+    log_store = get_log_store()
+    chat_logs = log_store.get_chat_logs(limit=limit)
+
+    return {
+        "count": len(chat_logs),
+        "chats": chat_logs,
+    }
+
+
+@app.get("/logs/errors")
+async def get_error_logs(limit: int = 50):
+    """获取最近的错误日志。"""
+    from src.utils.logger import get_log_store
+
+    log_store = get_log_store()
+    error_logs = log_store.get_error_logs(limit=limit)
+
+    return {
+        "count": len(error_logs),
+        "errors": error_logs,
+    }
+
+
+@app.get("/logs/stats")
+async def get_log_stats():
+    """获取日志统计信息。"""
+    from src.utils.logger import get_log_store
+
+    log_store = get_log_store()
+    stats = log_store.get_stats()
+
+    return stats
+
+
+@app.get("/monitor")
+async def serve_monitor_page():
+    """Serve the monitor page."""
+    html_path = Path(__file__).parent / "interfaces" / "web" / "monitor.html"
+    if html_path.exists():
+        return FileResponse(html_path)
+    raise HTTPException(status_code=404, detail="Monitor page not found")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

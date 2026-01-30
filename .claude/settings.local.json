@@ -12,7 +12,11 @@
       "Bash(docker pull:*)",
       "Bash(git init:*)",
       "Bash(git remote add:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: AI Girlfriend Agent\n\n- FastAPI web interface with chat functionality\n- Multiple AI provider support (Qianwen/GLM, OpenAI, Zhipu)\n- RAG system with FAISS and Qdrant backends\n- Memory management (short-term and long-term)\n- Personality system with configurable traits\n- Emotion analysis\n- Relationship building system\n- WeChat integration support\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(if not exist \"D:\\work\\aigf\\cclogs\" mkdir \"D:\\work\\aigf\\cclogs\")"
     ],
     "deny": [],
     "ask": []

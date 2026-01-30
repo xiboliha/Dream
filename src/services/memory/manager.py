@@ -94,18 +94,24 @@ class MemoryManager:
         try:
             response = await self.ai_service.simple_chat(
                 user_message=prompt,
-                system_prompt="你是一个记忆提取助手，负责从对话中提取重要信息。",
+                system_prompt="你是一个记忆提取助手，负责从对话中提取重要信息。只输出JSON，不要其他内容。",
                 temperature=0.3,
             )
 
             # Parse JSON response
             extracted = self._parse_extraction_response(response)
             if not extracted:
+                logger.debug(f"No valid JSON extracted from response: {response[:200]}")
                 return []
 
             # Create short-term memories
             memories = []
-            for info in extracted.get("extracted_info", []):
+            extracted_info = extracted.get("extracted_info", [])
+            if not isinstance(extracted_info, list):
+                logger.warning(f"extracted_info is not a list: {type(extracted_info)}")
+                return []
+
+            for info in extracted_info:
                 memory = ShortTermMemory(
                     user_id=user_id,
                     conversation_id=conversation_id,
@@ -133,17 +139,42 @@ class MemoryManager:
         import re
         try:
             # Try to find JSON in response
-            start = response.find("{")
-            end = response.rfind("}") + 1
-            if start >= 0 and end > start:
-                json_str = response[start:end]
-                # Clean up common issues
-                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
-                json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
-                return json.loads(json_str)
+            # 先尝试找 ```json ... ``` 代码块
+            json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 否则找 { ... } 结构
+                start = response.find("{")
+                end = response.rfind("}") + 1
+                if start >= 0 and end > start:
+                    json_str = response[start:end]
+                else:
+                    logger.debug(f"No JSON structure found in response")
+                    return None
+
+            # Clean up common issues
+            json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas before }
+            json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas before ]
+            # 保留换行符但移除其他控制字符
+            json_str = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f]+', ' ', json_str)
+            json_str = json_str.strip()
+
+            result = json.loads(json_str)
+            logger.debug(f"Successfully parsed JSON with keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
+            return result
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse extraction response: {e}")
-            logger.debug(f"Response was: {response[:500]}")
+            logger.warning(f"JSON parse error: {e}")
+            # 尝试更激进的清理
+            try:
+                # 移除所有换行和多余空格
+                json_str_clean = re.sub(r'\s+', ' ', json_str)
+                return json.loads(json_str_clean)
+            except:
+                pass
+            logger.debug(f"Response was: {response[:300]}")
+        except Exception as e:
+            logger.warning(f"Unexpected error parsing extraction response: {e}")
         return None
 
     def _map_info_type(self, info_type: str) -> str:

@@ -572,6 +572,16 @@ class ConversationEngine:
             message_type=MessageType.TEXT.value,
         )
 
+        # 记录对话日志到监控系统
+        from src.utils.logger import get_log_store
+        response_time = (datetime.utcnow() - conversation.updated_at).total_seconds() * 1000 if conversation.updated_at else 0
+        get_log_store().add_chat_log(
+            user_id=user_id,
+            user_msg=message_content,
+            ai_response=response_content,
+            response_time=response_time,
+        )
+
         # Extract memories in background (don't wait)
         asyncio.create_task(
             self._extract_memories_background(
@@ -607,7 +617,8 @@ class ConversationEngine:
                 session, user_id, conversation_id, messages
             )
         except Exception as e:
-            logger.error(f"Background memory extraction failed: {e}")
+            # 静默处理记忆提取错误，不影响主对话流程
+            logger.debug(f"Background memory extraction skipped: {e}")
 
     async def end_conversation(
         self,
