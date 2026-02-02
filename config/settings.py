@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     # Qianwen (Aliyun DashScope)
     qianwen_api_key: Optional[str] = None
-    qianwen_model: str = "glm-4.7"
+    qianwen_model: str = "deepseek-v3"
 
     # Wenxin (Baidu)
     wenxin_api_key: Optional[str] = None
@@ -97,6 +97,9 @@ class Settings(BaseSettings):
 
     # Scheduler
     morning_greeting_hour: int = 8
+    noon_greeting_hour: int = 12  # 午饭提醒
+    afternoon_nap_hour: int = 14  # 午睡结束
+    dinner_greeting_hour: int = 18  # 晚饭提醒
     night_greeting_hour: int = 22
 
     # Logging

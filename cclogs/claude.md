@@ -191,3 +191,79 @@ https://github.com/xiboliha/Dream
 - [ ] 记忆提取功能（glm-4.7 JSON输出不稳定）
 - [ ] 日志文件持久化
 - [ ] 更多人格配置
+
+### 2026-02-02 会话记录
+
+#### 主要完成工作
+
+1. **多条消息回复功能**
+   - 实现 `_split_multi_messages()` 方法，智能拆分回复
+   - 支持兴奋/生气等情绪时连发多条消息
+   - 模拟真人聊天的分段发送效果
+   - API 返回 `messages` 数组，包含每条消息的独立延迟
+
+2. **定时任务系统**
+   - 创建 `ProactiveMessageService` 主动消息服务
+   - 支持5个时间点的定时问候：
+     - 08:00 早安
+     - 12:00 午饭提醒
+     - 14:00 午睡结束
+     - 18:00 晚饭提醒
+     - 22:00 晚安
+   - 配置项在 `config/settings.py` 中可调整
+
+3. **空闲检测功能**
+   - 跟踪用户最后活动时间
+   - 30分钟无回复时主动发消息
+   - 防止消息轰炸（最小间隔控制）
+   - 多种空闲提醒模板
+
+4. **前端更新**
+   - 支持多条消息依次显示，带打字指示器
+   - 添加主动消息轮询（30秒间隔）
+   - 用户交互时自动更新活动状态
+
+5. **新增API接口**
+   - `GET /users/{user_id}/proactive` - 获取主动消息
+   - `POST /users/{user_id}/activity` - 更新用户活动
+   - `GET /proactive/settings` - 获取主动消息设置
+
+#### 关键文件修改
+
+- `src/core/conversation/engine.py` - 多条消息拆分逻辑
+- `src/services/proactive/message_service.py` - 主动消息服务（新建）
+- `src/app.py` - 集成主动消息服务，新增API
+- `src/interfaces/web/chat.html` - 多消息显示，主动消息轮询
+- `config/settings.py` - 新增定时任务时间配置
+
+#### 新增文件
+
+- `src/services/proactive/__init__.py`
+- `src/services/proactive/message_service.py`
+
+#### API变更
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/users/{user_id}/proactive` | GET | 获取主动消息 |
+| `/users/{user_id}/activity` | POST | 更新用户活动 |
+| `/proactive/settings` | GET | 主动消息设置 |
+
+#### ChatResponse 新增字段
+
+```json
+{
+  "response": "完整回复",
+  "messages": [
+    {"content": "第一条", "typing_delay": 1.2},
+    {"content": "第二条", "typing_delay": 0.8}
+  ],
+  ...
+}
+```
+
+#### 待优化项
+
+- [ ] 本地模型集成（qwen1.5-4b）
+- [ ] 微调数据收集
+- [ ] WebSocket 替代轮询（实时推送）

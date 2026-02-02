@@ -145,11 +145,15 @@
     </div>
     <script>
         const API_BASE = window.location.origin;
+        const USER_ID = 1;
         const chatArea = document.getElementById('chatArea');
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
         const typingIndicator = document.getElementById('typingIndicator');
-        
+
+        // Proactive message polling interval (30 seconds)
+        let proactiveInterval = null;
+
         function addMessage(content, isUser) {
             const div = document.createElement('div');
             div.className = 'message ' + (isUser ? 'user' : 'assistant');
@@ -157,7 +161,25 @@
             chatArea.appendChild(div);
             chatArea.scrollTop = chatArea.scrollHeight;
         }
-        
+
+        async function showMultipleMessages(messages) {
+            // Display multiple messages with realistic delays
+            for (let i = 0; i < messages.length; i++) {
+                const msg = messages[i];
+                // Show typing indicator before each message
+                if (i > 0) {
+                    typingIndicator.classList.add('show');
+                    await new Promise(r => setTimeout(r, msg.typing_delay * 1000));
+                    typingIndicator.classList.remove('show');
+                }
+                addMessage(msg.content, false);
+                // Small pause between messages for natural feel
+                if (i < messages.length - 1) {
+                    await new Promise(r => setTimeout(r, 300));
+                }
+            }
+        }
+
         async function sendMessage() {
             const msg = messageInput.value.trim();
             if (!msg) return;
@@ -169,22 +191,107 @@
                 const res = await fetch(API_BASE + '/chat', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: 1, message: msg})
+                    body: JSON.stringify({user_id: USER_ID, message: msg})
                 });
                 const data = await res.json();
+                // Wait for first message typing delay
                 await new Promise(r => setTimeout(r, Math.min(data.typing_delay * 1000, 2000)));
-                addMessage(data.response, false);
+                typingIndicator.classList.remove('show');
+
+                // Check if we have multiple messages
+                if (data.messages && data.messages.length > 1) {
+                    await showMultipleMessages(data.messages);
+                } else {
+                    addMessage(data.response, false);
+                }
             } catch(e) {
+                typingIndicator.classList.remove('show');
                 addMessage('网络出了点问题~', false);
             }
-            typingIndicator.classList.remove('show');
             sendBtn.disabled = false;
             messageInput.focus();
         }
-        
+
+        // Poll for proactive messages (greetings, idle reminders, random chat)
+        async function checkProactiveMessages() {
+            try {
+                const res = await fetch(API_BASE + '/users/' + USER_ID + '/proactive');
+                const data = await res.json();
+                if (data.messages && data.messages.length > 0) {
+                    // Group messages by timestamp (连发的消息时间戳相同)
+                    const groups = [];
+                    let currentGroup = [];
+                    let lastTimestamp = null;
+
+                    for (const msg of data.messages) {
+                        if (lastTimestamp && msg.timestamp !== lastTimestamp) {
+                            if (currentGroup.length > 0) {
+                                groups.push(currentGroup);
+                            }
+                            currentGroup = [msg];
+                        } else {
+                            currentGroup.push(msg);
+                        }
+                        lastTimestamp = msg.timestamp;
+                    }
+                    if (currentGroup.length > 0) {
+                        groups.push(currentGroup);
+                    }
+
+                    // Display each group with realistic delays
+                    for (const group of groups) {
+                        for (let i = 0; i < group.length; i++) {
+                            const msg = group[i];
+                            // Show typing indicator
+                            typingIndicator.classList.add('show');
+                            // First message longer delay, subsequent shorter
+                            const delay = i === 0 ? 800 : 500;
+                            await new Promise(r => setTimeout(r, delay));
+                            typingIndicator.classList.remove('show');
+                            addMessage(msg.content, false);
+                            // Small pause between messages
+                            if (i < group.length - 1) {
+                                await new Promise(r => setTimeout(r, 300));
+                            }
+                        }
+                        // Pause between groups
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                }
+            } catch(e) {
+                // Silently ignore polling errors
+            }
+        }
+
+        // Update activity on user interaction
+        function updateActivity() {
+            fetch(API_BASE + '/users/' + USER_ID + '/activity', { method: 'POST' }).catch(() => {});
+        }
+
+        // Start proactive message polling
+        function startProactivePolling() {
+            // Initial activity update
+            updateActivity();
+            // Poll every 30 seconds
+            proactiveInterval = setInterval(checkProactiveMessages, 30000);
+            // Also check immediately
+            setTimeout(checkProactiveMessages, 2000);
+        }
+
+        // Event listeners
         sendBtn.onclick = sendMessage;
-        messageInput.onkeydown = e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+        messageInput.onkeydown = e => {
+            if(e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        };
+        // Update activity on any input
+        messageInput.oninput = updateActivity;
         messageInput.focus();
+
+        // Start polling when page loads
+        startProactivePolling();
     </script>
 </body>
 </html>

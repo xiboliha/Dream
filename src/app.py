@@ -22,9 +22,16 @@ class ChatRequest(BaseModel):
     message_type: str = "text"
 
 
+class MessageItem(BaseModel):
+    """Single message item in multi-message response."""
+    content: str
+    typing_delay: float = 1.0
+
+
 class ChatResponse(BaseModel):
     """Chat response model."""
     response: str
+    messages: List[MessageItem] = []  # New: multiple messages support
     conversation_id: int
     session_id: str
     emotion_detected: Optional[str] = None
@@ -54,12 +61,13 @@ class HealthResponse(BaseModel):
 _conversation_engine = None
 _coordinator = None
 _dialogue_rag = None
+_proactive_service = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global _conversation_engine, _coordinator, _dialogue_rag
+    global _conversation_engine, _coordinator, _dialogue_rag, _proactive_service
 
     logger.info("Starting AI Girlfriend Agent API...")
 
@@ -73,6 +81,7 @@ async def lifespan(app: FastAPI):
     from src.core.personality import init_personality_system
     from src.core.coordinator import init_coordinator
     from src.services.knowledge import VectorStore, DialogueRAG
+    from src.services.proactive import init_proactive_service
 
     setup_logger(log_level=settings.log_level)
 
@@ -162,12 +171,18 @@ async def lifespan(app: FastAPI):
     # Initialize coordinator
     _coordinator = init_coordinator(_conversation_engine)
 
+    # Initialize proactive message service
+    _proactive_service = init_proactive_service()
+    _proactive_service.start()
+
     logger.info("API initialization complete")
 
     yield
 
     # Cleanup
     logger.info("Shutting down API...")
+    if _proactive_service:
+        await _proactive_service.stop()
     await ai_service.close()
     await close_cache()
     await close_database()
@@ -224,7 +239,7 @@ async def health_check():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Send a chat message and get response."""
-    global _conversation_engine
+    global _conversation_engine, _proactive_service
 
     if not _conversation_engine:
         raise HTTPException(status_code=503, detail="Service not initialized")
@@ -237,6 +252,10 @@ async def chat(request: ChatRequest):
         db = get_database_service()
         personality_system = get_personality_system()
         emotion_analyzer = get_emotion_analyzer()
+
+        # Update user activity for proactive messaging
+        if _proactive_service:
+            _proactive_service.update_user_activity(request.user_id)
 
         async with db.get_async_session() as session:
             # Analyze emotion
@@ -258,6 +277,7 @@ async def chat(request: ChatRequest):
 
         return ChatResponse(
             response=result["response"],
+            messages=[MessageItem(**m) for m in result.get("messages", [])],
             conversation_id=result["conversation_id"],
             session_id=result["session_id"],
             emotion_detected=emotion_result.primary_emotion.value,
@@ -546,6 +566,50 @@ async def serve_monitor_page():
     if html_path.exists():
         return FileResponse(html_path)
     raise HTTPException(status_code=404, detail="Monitor page not found")
+
+
+# ============ 主动消息 API ============
+
+@app.get("/users/{user_id}/proactive")
+async def get_proactive_messages(user_id: int):
+    """获取用户的主动消息（定时问候、空闲提醒等）。
+
+    前端应定期轮询此接口获取主动消息。
+    """
+    global _proactive_service
+
+    if not _proactive_service:
+        return {"messages": []}
+
+    messages = _proactive_service.get_pending_messages(user_id)
+    return {"messages": messages}
+
+
+@app.post("/users/{user_id}/activity")
+async def update_user_activity(user_id: int):
+    """更新用户活动时间（用于空闲检测）。
+
+    前端可在用户有任何交互时调用此接口。
+    """
+    global _proactive_service
+
+    if _proactive_service:
+        _proactive_service.update_user_activity(user_id)
+
+    return {"status": "ok"}
+
+
+@app.get("/proactive/settings")
+async def get_proactive_settings():
+    """获取主动消息设置。"""
+    return {
+        "morning_greeting_hour": settings.morning_greeting_hour,
+        "noon_greeting_hour": settings.noon_greeting_hour,
+        "afternoon_nap_hour": settings.afternoon_nap_hour,
+        "dinner_greeting_hour": settings.dinner_greeting_hour,
+        "night_greeting_hour": settings.night_greeting_hour,
+        "idle_threshold_minutes": 30,
+    }
 
 
 if __name__ == "__main__":

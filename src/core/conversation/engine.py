@@ -76,10 +76,32 @@ class ConversationEngine:
         self.weather_tool = WeatherTool()
 
     def _filter_response(self, content: str) -> str:
-        """Filter out kaomoji and excessive emoji from response."""
+        """Filter out kaomoji, excessive emoji, and model thinking process from response."""
         import re
 
         filtered = content
+
+        # Remove model thinking process (模型思考过程)
+        # Remove everything that looks like thinking/analysis
+        filtered = re.sub(r'^\d+\.\s*\*\*.*$', '', filtered, flags=re.MULTILINE)
+        filtered = re.sub(r'^\d+\.\s*".*$', '', filtered, flags=re.MULTILINE)
+        filtered = re.sub(r'\*\*[^*]+\*\*', '', filtered)
+        filtered = re.sub(r'\*[^*]+\*', '', filtered)
+
+        # Remove lines containing analysis keywords
+        analysis_keywords = ['分析', '输入', '步骤', '思考', '判断', '检查', 'User:', 'Assistant:', '用户发送', '回复策略']
+        for kw in analysis_keywords:
+            filtered = re.sub(rf'^.*{kw}.*$', '', filtered, flags=re.MULTILINE)
+
+        # Remove lines with technical patterns
+        filtered = re.sub(r'^.*(?:->|//|：\s*$|INFP|cm\d+kg).*$', '', filtered, flags=re.MULTILINE)
+        filtered = re.sub(r'^[\s\*\-\>\<\|\/"\'""]+$', '', filtered, flags=re.MULTILINE)
+
+        # Remove numbered items
+        filtered = re.sub(r'^\s*\d+\s*[""].*$', '', filtered, flags=re.MULTILINE)
+
+        # Remove quotes that look like examples
+        filtered = re.sub(r'[""][^""]*[""]', '', filtered)
 
         # Remove kaomoji patterns
         for pattern in self._kaomoji_patterns:
@@ -100,10 +122,10 @@ class ConversationEngine:
         # Remove excessive emoji (keep max 1)
         emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags
+            "\U0001F600-\U0001F64F"
+            "\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF"
+            "\U0001F1E0-\U0001F1FF"
             "\U00002702-\U000027B0"
             "\U000024C2-\U0001F251"
             "]+",
@@ -111,14 +133,22 @@ class ConversationEngine:
         )
         emojis = emoji_pattern.findall(filtered)
         if len(emojis) > 1:
-            # Keep only the first emoji
             for emoji in emojis[1:]:
                 filtered = filtered.replace(emoji, '', 1)
 
-        # Clean up extra spaces and tildes
-        filtered = re.sub(r'~+\s*$', '', filtered)  # Remove trailing ~
-        filtered = re.sub(r'\s{2,}', ' ', filtered)  # Multiple spaces to one
+        # Clean up
+        filtered = re.sub(r'~+\s*$', '', filtered)
+        filtered = re.sub(r'\s{2,}', ' ', filtered)
+        filtered = re.sub(r'\n{2,}', '\n', filtered)
+        filtered = re.sub(r'^[\s\-\.]+$', '', filtered, flags=re.MULTILINE)
+        # Remove trailing ellipsis (模型经常在末尾加...)
+        filtered = re.sub(r'\.{2,}$', '', filtered)
+        filtered = re.sub(r'…+$', '', filtered)
         filtered = filtered.strip()
+
+        # If filtered result is garbage or too short, return a fallback
+        if not filtered or len(filtered) < 2 or filtered.count('"') > 2:
+            return "嗯"
 
         return filtered
 
@@ -434,6 +464,71 @@ class ConversationEngine:
 
         return prompt
 
+    def _split_multi_messages(self, content: str) -> List[str]:
+        """Split response into multiple messages for realistic chat feel.
+
+        Detects patterns like:
+        - Multiple lines with short content
+        - Excitement patterns (连发多条)
+        - Emotional outbursts (生气、困惑、难过等)
+
+        Args:
+            content: AI response content
+
+        Returns:
+            List of message strings
+        """
+        import re
+
+        # Check if content contains natural split points
+        # Pattern 1: Lines starting with "答：" from few-shot examples
+        if "答：" in content:
+            parts = [p.strip() for p in content.split("答：") if p.strip()]
+            if len(parts) > 1:
+                return parts
+
+        # Pattern 2: Multiple short sentences with line breaks
+        # e.g., "啊啊啊好可爱！！\n在哪看到的\n我也想要"
+        # or "没事\n就是有点难受\n不想说了"
+        lines = content.split('\n')
+        if len(lines) > 1:
+            # Filter empty lines and check if they're short enough to be separate messages
+            valid_lines = [l.strip() for l in lines if l.strip()]
+            if len(valid_lines) > 1 and all(len(l) < 50 for l in valid_lines):
+                # Filter out lines that are just "..."
+                valid_lines = [l for l in valid_lines if l != '...' and l != '…']
+                if len(valid_lines) > 1:
+                    return valid_lines
+
+        # Pattern 3: Detect excitement/anger patterns that should be split
+        # Multiple exclamation marks or question marks in sequence
+        excitement_pattern = r'([^！？!?]+[！？!?]{2,})'
+        matches = re.findall(excitement_pattern, content)
+        if len(matches) >= 2:
+            # Split by these patterns
+            parts = re.split(r'(?<=[！？!?]{2})\s*', content)
+            parts = [p.strip() for p in parts if p.strip() and p != '...' and p != '…']
+            if len(parts) > 1:
+                return parts
+
+        # Pattern 4: Consecutive questions (追问模式)
+        # e.g., "怎么了？发生什么事了？他凭什么骂你？"
+        question_parts = re.split(r'(?<=[？?])\s*', content)
+        question_parts = [p.strip() for p in question_parts if p.strip() and p != '...' and p != '…']
+        if len(question_parts) >= 2 and all(len(p) < 30 for p in question_parts):
+            return question_parts
+
+        # Pattern 5: Short consecutive sentences (under 25 chars each)
+        # Split by Chinese/English sentence endings
+        sentences = re.split(r'(?<=[。！？!?])\s*', content)
+        sentences = [s.strip() for s in sentences if s.strip() and s != '...' and s != '…']
+
+        if len(sentences) >= 2 and all(len(s) < 25 for s in sentences):
+            return sentences
+
+        # Default: return as single message (don't split)
+        return [content]
+
     async def generate_response(
         self,
         session: AsyncSession,
@@ -541,7 +636,7 @@ class ConversationEngine:
             personality_config: Optional personality configuration
 
         Returns:
-            Dict with response and metadata
+            Dict with response and metadata (supports multiple messages)
         """
         # Get or create conversation
         conversation = await self.get_or_create_conversation(session, user_id)
@@ -563,7 +658,10 @@ class ConversationEngine:
             personality_config,
         )
 
-        # Save assistant message
+        # Split into multiple messages if applicable
+        messages = self._split_multi_messages(response_content)
+
+        # Save assistant message (full content for history)
         assistant_msg = await self.add_message(
             session,
             conversation,
@@ -593,15 +691,28 @@ class ConversationEngine:
             )
         )
 
-        # Calculate typing delay for realistic feel
-        typing_delay = calculate_typing_delay(response_content)
+        # Calculate typing delays for each message
+        import random
+        multi_messages = []
+        for i, msg in enumerate(messages):
+            # First message has normal delay, subsequent messages have shorter delays
+            if i == 0:
+                delay = calculate_typing_delay(msg)
+            else:
+                # Shorter delay for follow-up messages (0.5-1.5 seconds)
+                delay = random.uniform(0.5, 1.5)
+            multi_messages.append({
+                "content": msg,
+                "typing_delay": delay,
+            })
 
         return {
-            "response": response_content,
+            "response": response_content,  # Full response for backward compatibility
+            "messages": multi_messages,  # New: array of messages with individual delays
             "conversation_id": conversation.id,
             "session_id": conversation.session_id,
             "message_id": assistant_msg.id,
-            "typing_delay": typing_delay,
+            "typing_delay": multi_messages[0]["typing_delay"] if multi_messages else 1.0,
         }
 
     async def _extract_memories_background(
