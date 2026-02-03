@@ -3,7 +3,7 @@
 import asyncio
 import random
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 
 from loguru import logger
 import pytz
@@ -23,6 +23,10 @@ class ProactiveMessageService:
         self._task: Optional[asyncio.Task] = None
         self._message_callback: Optional[Callable] = None
 
+        # AI service for generating smart topics
+        self._ai_service = None
+        self._db_service = None
+
         # Track last activity per user
         self._user_last_activity: Dict[int, datetime] = {}
 
@@ -31,6 +35,9 @@ class ProactiveMessageService:
 
         # Pending messages queue (for frontend polling)
         self._pending_messages: Dict[int, List[Dict]] = {}
+
+        # WebSocket connections
+        self._websocket_connections: Dict[int, List[Any]] = {}
 
         # Scheduled greeting templates (支持多条连发)
         self._greeting_templates = {
@@ -293,8 +300,215 @@ class ProactiveMessageService:
                 continue
 
             if self._should_send_proactive(user_id, min_interval_minutes=90):
-                messages = random.choice(self._proactive_chat_templates)
-                self._add_pending_messages(user_id, messages, "random_chat")
+                # 尝试生成智能话题，失败则使用模板
+                smart_messages = await self._generate_smart_topic(user_id)
+                if smart_messages:
+                    self._add_pending_messages(user_id, smart_messages, "smart_chat")
+                else:
+                    messages = random.choice(self._proactive_chat_templates)
+                    self._add_pending_messages(user_id, messages, "random_chat")
+
+    def set_services(self, ai_service, db_service) -> None:
+        """Set AI and database services for smart topic generation.
+
+        Args:
+            ai_service: AI service for generating messages
+            db_service: Database service for memory access
+        """
+        self._ai_service = ai_service
+        self._db_service = db_service
+        logger.info("Proactive service: AI and DB services configured")
+
+    async def _get_user_memories(self, user_id: int) -> List[Dict]:
+        """Get user's memories for context.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of memory dicts
+        """
+        if not self._db_service:
+            return []
+
+        try:
+            from src.services.memory import MemoryManager
+            from src.services.ai import create_ai_service
+            from config.settings import settings
+
+            async with self._db_service.get_async_session() as session:
+                # 创建临时memory manager
+                if self._ai_service:
+                    memory_manager = MemoryManager(ai_service=self._ai_service)
+                    memories = await memory_manager.get_user_memories(session, user_id, limit=10)
+                    return [
+                        {
+                            "type": m.memory_type,
+                            "key": m.key,
+                            "value": m.value,
+                            "category": m.category,
+                        }
+                        for m in memories
+                    ]
+        except Exception as e:
+            logger.debug(f"Failed to get user memories: {e}")
+
+        return []
+
+    async def _generate_smart_topic(self, user_id: int) -> Optional[List[str]]:
+        """Generate smart topic based on user memories.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of messages or None
+        """
+        if not self._ai_service:
+            return None
+
+        try:
+            # 获取用户记忆
+            memories = await self._get_user_memories(user_id)
+
+            if not memories:
+                return None
+
+            # 构建提示词
+            memory_context = "\n".join([
+                f"- {m['type']}: {m['value']}"
+                for m in memories[:5]
+            ])
+
+            prompt = f"""你是小爱，一个22岁的女生，正在和男朋友聊天。
+根据你记得的关于他的信息，主动发起一个话题。
+
+你记得的信息：
+{memory_context}
+
+要求：
+1. 像真人发微信一样，可以是1-3条短消息
+2. 自然地提起之前聊过的事情，比如"对了，你上次说的xxx怎么样了"
+3. 语气要自然，不要太正式
+4. 每条消息用换行分隔
+
+直接输出消息内容，不要其他解释："""
+
+            response = await self._ai_service.simple_chat(
+                user_message=prompt,
+                system_prompt="你是小爱，直接输出要发送的消息，每条消息一行，不要任何解释。",
+                temperature=0.9,
+                max_tokens=150,
+            )
+
+            # 解析回复
+            lines = [line.strip() for line in response.strip().split('\n') if line.strip()]
+            if lines:
+                # 过滤掉太长或太短的
+                lines = [l for l in lines if 2 <= len(l) <= 50]
+                if lines:
+                    return lines[:3]  # 最多3条
+
+        except Exception as e:
+            logger.debug(f"Smart topic generation failed: {e}")
+
+        return None
+
+    # WebSocket 相关方法
+    def register_websocket(self, user_id: int, websocket) -> None:
+        """Register a WebSocket connection for user.
+
+        Args:
+            user_id: User ID
+            websocket: WebSocket connection
+        """
+        if user_id not in self._websocket_connections:
+            self._websocket_connections[user_id] = []
+        self._websocket_connections[user_id].append(websocket)
+        logger.info(f"WebSocket registered for user {user_id}")
+
+    def unregister_websocket(self, user_id: int, websocket) -> None:
+        """Unregister a WebSocket connection.
+
+        Args:
+            user_id: User ID
+            websocket: WebSocket connection
+        """
+        if user_id in self._websocket_connections:
+            try:
+                self._websocket_connections[user_id].remove(websocket)
+                if not self._websocket_connections[user_id]:
+                    del self._websocket_connections[user_id]
+                logger.info(f"WebSocket unregistered for user {user_id}")
+            except ValueError:
+                pass
+
+    async def broadcast_to_user(self, user_id: int, message: Dict) -> bool:
+        """Broadcast message to user via WebSocket.
+
+        Args:
+            user_id: User ID
+            message: Message dict to send
+
+        Returns:
+            True if sent to at least one connection
+        """
+        if user_id not in self._websocket_connections:
+            return False
+
+        sent = False
+        dead_connections = []
+
+        for ws in self._websocket_connections[user_id]:
+            try:
+                import json
+                await ws.send_text(json.dumps(message, ensure_ascii=False))
+                sent = True
+            except Exception as e:
+                logger.debug(f"WebSocket send failed: {e}")
+                dead_connections.append(ws)
+
+        # 清理断开的连接
+        for ws in dead_connections:
+            self.unregister_websocket(user_id, ws)
+
+        return sent
+
+    def _add_pending_messages(self, user_id: int, messages: List[str], msg_type: str = "proactive") -> None:
+        """Add multiple pending messages for user (连发多条).
+
+        Args:
+            user_id: User ID
+            messages: List of message contents
+            msg_type: Message type
+        """
+        if user_id not in self._pending_messages:
+            self._pending_messages[user_id] = []
+
+        now = datetime.now(pytz.timezone(self.timezone))
+        msg_list = []
+
+        for i, message in enumerate(messages):
+            msg_dict = {
+                "content": message,
+                "type": msg_type,
+                "timestamp": now.isoformat(),
+                "sequence": i,
+            }
+            self._pending_messages[user_id].append(msg_dict)
+            msg_list.append(msg_dict)
+
+        # Update last proactive time
+        self._user_last_proactive[user_id] = now
+
+        logger.info(f"Added {len(messages)} proactive messages for user {user_id}: {messages}")
+
+        # 尝试通过WebSocket推送
+        if user_id in self._websocket_connections:
+            asyncio.create_task(self.broadcast_to_user(user_id, {
+                "type": "proactive",
+                "messages": msg_list,
+            }))
 
     async def _run_loop(self) -> None:
         """Main service loop."""

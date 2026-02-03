@@ -265,14 +265,86 @@
 
         // Update activity on user interaction
         function updateActivity() {
-            fetch(API_BASE + '/users/' + USER_ID + '/activity', { method: 'POST' }).catch(() => {});
+            // 优先通过WebSocket发送
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'activity'}));
+            } else {
+                fetch(API_BASE + '/users/' + USER_ID + '/activity', { method: 'POST' }).catch(() => {});
+            }
         }
 
-        // Start proactive message polling
+        // WebSocket connection
+        let ws = null;
+        let wsReconnectTimer = null;
+
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = wsProtocol + '//' + window.location.host + '/ws/' + USER_ID;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                // 连接成功后停止轮询
+                if (proactiveInterval) {
+                    clearInterval(proactiveInterval);
+                    proactiveInterval = null;
+                }
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'proactive' && data.messages) {
+                        // 显示主动消息
+                        for (let i = 0; i < data.messages.length; i++) {
+                            const msg = data.messages[i];
+                            typingIndicator.classList.add('show');
+                            const delay = i === 0 ? 800 : 500;
+                            await new Promise(r => setTimeout(r, delay));
+                            typingIndicator.classList.remove('show');
+                            addMessage(msg.content, false);
+                            if (i < data.messages.length - 1) {
+                                await new Promise(r => setTimeout(r, 300));
+                            }
+                        }
+                    } else if (data.type === 'pong') {
+                        // 心跳响应
+                    }
+                } catch(e) {
+                    console.error('WebSocket message error:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected, reconnecting...');
+                ws = null;
+                // 断开后恢复轮询并尝试重连
+                if (!proactiveInterval) {
+                    proactiveInterval = setInterval(checkProactiveMessages, 30000);
+                }
+                wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // 心跳保持连接
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'ping'}));
+            }
+        }, 30000);
+
+        // Start proactive message polling (fallback)
         function startProactivePolling() {
             // Initial activity update
             updateActivity();
-            // Poll every 30 seconds
+            // 尝试WebSocket连接
+            connectWebSocket();
+            // 同时启动轮询作为备用
             proactiveInterval = setInterval(checkProactiveMessages, 30000);
             // Also check immediately
             setTimeout(checkProactiveMessages, 2000);

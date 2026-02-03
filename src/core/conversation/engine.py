@@ -21,7 +21,7 @@ from src.models.user import User
 from src.services.ai import AIMessage, AIRole, AIServiceProvider
 from src.services.memory import MemoryManager
 from src.services.knowledge import DialogueKnowledgeBase
-from src.services.tools import WeatherTool
+from src.services.tools import WeatherTool, WebSearchTool
 from src.utils.helpers import generate_session_id, get_time_greeting, calculate_typing_delay
 
 
@@ -74,6 +74,7 @@ class ConversationEngine:
 
         # Initialize tools
         self.weather_tool = WeatherTool()
+        self.search_tool = WebSearchTool()
 
     def _filter_response(self, content: str) -> str:
         """Filter out kaomoji, excessive emoji, and model thinking process from response."""
@@ -148,7 +149,9 @@ class ConversationEngine:
 
         # If filtered result is garbage or too short, return a fallback
         if not filtered or len(filtered) < 2 or filtered.count('"') > 2:
-            return "嗯"
+            import random
+            fallbacks = ["在呢", "怎么了", "说啥", "？", "然后呢"]
+            return random.choice(fallbacks)
 
         return filtered
 
@@ -196,6 +199,31 @@ class ConversationEngine:
                 return self.weather_tool.format_weather_response(weather)
         except Exception as e:
             logger.warning(f"Weather fetch failed: {e}")
+
+        return None
+
+    async def _check_and_search_web(self, user_message: str) -> Optional[str]:
+        """Check if user wants to search and perform search if needed.
+
+        Args:
+            user_message: User's message
+
+        Returns:
+            Search results string or None
+        """
+        # Check if message triggers search
+        search_query = self.search_tool.should_search(user_message)
+        if not search_query:
+            return None
+
+        logger.info(f"Triggering web search for: {search_query}")
+
+        try:
+            search_results = await self.search_tool.search(search_query)
+            if search_results.get("success"):
+                return self.search_tool.format_search_results(search_results)
+        except Exception as e:
+            logger.warning(f"Web search failed: {e}")
 
         return None
 
@@ -552,6 +580,9 @@ class ConversationEngine:
         # Check if user is asking about weather
         weather_info = await self._check_and_get_weather(user_message)
 
+        # Check if user wants to search the web
+        search_info = await self._check_and_search_web(user_message)
+
         # Search for similar dialogues using RAG
         rag_context = ""
         if self.dialogue_rag and self.dialogue_rag.is_initialized:
@@ -576,6 +607,10 @@ class ConversationEngine:
         # If we have weather info, add it to the context
         if weather_info:
             system_prompt += f"\n\n【实时信息】\n{weather_info}"
+
+        # If we have search results, add them to the context
+        if search_info:
+            system_prompt += f"\n\n【网络搜索结果】\n{search_info}\n（请根据搜索结果用自然的方式回答用户，不要直接复制粘贴）"
 
         ai_messages = [
             AIMessage(role=AIRole.SYSTEM, content=system_prompt)
@@ -683,7 +718,7 @@ class ConversationEngine:
         # Extract memories in background (don't wait)
         asyncio.create_task(
             self._extract_memories_background(
-                session, user_id, conversation.id,
+                user_id, conversation.id,
                 [
                     {"role": "user", "content": message_content},
                     {"role": "assistant", "content": response_content},
@@ -717,16 +752,19 @@ class ConversationEngine:
 
     async def _extract_memories_background(
         self,
-        session: AsyncSession,
         user_id: int,
         conversation_id: int,
         messages: List[Dict[str, str]],
     ) -> None:
         """Extract memories in background task."""
         try:
-            await self.memory_manager.extract_memories(
-                session, user_id, conversation_id, messages
-            )
+            # 使用新的session，因为原session可能已关闭
+            from src.services.storage import get_database_service
+            db = get_database_service()
+            async with db.get_async_session() as session:
+                await self.memory_manager.extract_memories(
+                    session, user_id, conversation_id, messages
+                )
         except Exception as e:
             # 静默处理记忆提取错误，不影响主对话流程
             logger.debug(f"Background memory extraction skipped: {e}")

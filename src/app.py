@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -173,6 +173,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize proactive message service
     _proactive_service = init_proactive_service()
+    # 配置AI和DB服务，用于智能话题生成
+    from src.services.storage import get_database_service
+    _proactive_service.set_services(ai_service, get_database_service())
     _proactive_service.start()
 
     logger.info("API initialization complete")
@@ -409,6 +412,43 @@ async def get_greeting(user_id: int):
     except Exception as e:
         logger.error(f"Get greeting error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# WebSocket endpoint for real-time messaging
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    """WebSocket endpoint for real-time proactive messages."""
+    global _proactive_service
+
+    await websocket.accept()
+    logger.info(f"WebSocket connected for user {user_id}")
+
+    if _proactive_service:
+        _proactive_service.register_websocket(user_id, websocket)
+        _proactive_service.update_user_activity(user_id)
+
+    try:
+        while True:
+            # 接收客户端消息（心跳或活动更新）
+            data = await websocket.receive_text()
+            import json
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                elif msg.get("type") == "activity":
+                    if _proactive_service:
+                        _proactive_service.update_user_activity(user_id)
+            except json.JSONDecodeError:
+                pass
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        logger.debug(f"WebSocket error for user {user_id}: {e}")
+    finally:
+        if _proactive_service:
+            _proactive_service.unregister_websocket(user_id, websocket)
 
 
 # RAG API endpoints
