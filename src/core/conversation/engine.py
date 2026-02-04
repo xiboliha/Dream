@@ -22,6 +22,7 @@ from src.services.ai import AIMessage, AIRole, AIServiceProvider
 from src.services.memory import MemoryManager
 from src.services.knowledge import DialogueKnowledgeBase
 from src.services.tools import WeatherTool, WebSearchTool
+from src.services.emotion import get_emotion_analyzer, get_ai_emotion_manager, EmotionResult
 from src.utils.helpers import generate_session_id, get_time_greeting, calculate_typing_delay
 
 
@@ -75,6 +76,10 @@ class ConversationEngine:
         # Initialize tools
         self.weather_tool = WeatherTool()
         self.search_tool = WebSearchTool()
+
+        # Initialize emotion services
+        self.emotion_analyzer = get_emotion_analyzer()
+        self.ai_emotion_manager = get_ai_emotion_manager()
 
     def _filter_response(self, content: str) -> str:
         """Filter out kaomoji, excessive emoji, and model thinking process from response."""
@@ -427,6 +432,7 @@ class ConversationEngine:
         context: ConversationContext,
         personality_config: Optional[Dict[str, Any]] = None,
         user_message: str = "",
+        user_emotion: Optional[EmotionResult] = None,
     ) -> str:
         """Build system prompt with context.
 
@@ -434,6 +440,7 @@ class ConversationEngine:
             context: Conversation context
             personality_config: Optional personality configuration
             user_message: Current user message for few-shot matching
+            user_emotion: Detected user emotion for AI mood adjustment
 
         Returns:
             Formatted system prompt
@@ -480,6 +487,18 @@ class ConversationEngine:
             few_shot_prompt = self.dialogue_kb.build_few_shot_prompt(user_message)
             if few_shot_prompt:
                 prompt += f"\n\n{few_shot_prompt}"
+
+        # Add AI emotion state if user emotion is provided
+        if user_emotion:
+            # Update AI mood based on user emotion
+            self.ai_emotion_manager.update_mood(
+                context.user_id,
+                user_emotion,
+                context=user_message[:50] if user_message else ""
+            )
+            # Get mood prompt for injection
+            mood_prompt = self.ai_emotion_manager.get_mood_prompt(context.user_id)
+            prompt += f"\n\n{mood_prompt}"
 
         # Add personality traits if provided
         if personality_config:
@@ -563,6 +582,7 @@ class ConversationEngine:
         conversation: Conversation,
         user_message: str,
         personality_config: Optional[Dict[str, Any]] = None,
+        user_emotion: Optional[EmotionResult] = None,
     ) -> str:
         """Generate AI response to user message.
 
@@ -571,11 +591,17 @@ class ConversationEngine:
             conversation: Conversation instance
             user_message: User's message
             personality_config: Optional personality configuration
+            user_emotion: Optional pre-analyzed user emotion
 
         Returns:
             Generated response text
         """
         start_time = datetime.utcnow()
+
+        # Analyze user emotion if not provided
+        if user_emotion is None:
+            user_emotion = self.emotion_analyzer.analyze(user_message)
+            logger.debug(f"User emotion: {user_emotion.primary_emotion.value} (intensity: {user_emotion.intensity})")
 
         # Check if user is asking about weather
         weather_info = await self._check_and_get_weather(user_message)
@@ -597,8 +623,10 @@ class ConversationEngine:
         # Build context
         context = await self.build_context(session, conversation, user_message)
 
-        # Build messages for AI (pass user_message for few-shot matching)
-        system_prompt = self._build_system_prompt(context, personality_config, user_message)
+        # Build messages for AI (pass user_message and user_emotion for mood adjustment)
+        system_prompt = self._build_system_prompt(
+            context, personality_config, user_message, user_emotion
+        )
 
         # Add RAG context if available
         if rag_context:

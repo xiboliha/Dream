@@ -326,7 +326,7 @@ https://github.com/xiboliha/Dream
 | [ ] | 对话上下文理解优化 | AI经常忽略上下文，回复不连贯（如"骗你的"→"说啥"） | 中 |
 | [ ] | 更多对话场景示例 | 丰富few-shot示例，覆盖更多日常场景 | 低 |
 | [ ] | 记忆系统优化 | glm-4.7 JSON输出不稳定，记忆提取经常失败 | 中 |
-| [ ] | 情绪状态追踪 | 根据对话内容动态调整AI情绪状态 | 中 |
+| [x] | 情绪状态追踪 | 根据对话内容动态调整AI情绪状态 | 中 |
 
 ### 中优先级 - 功能增强 (P1)
 
@@ -342,7 +342,7 @@ https://github.com/xiboliha/Dream
 
 | 状态 | 功能 | 说明 | 难度 |
 |------|------|------|------|
-| [ ] | WebSocket实时推送 | 替代轮询，实现真正的实时消息 | 中 |
+| [x] | WebSocket实时推送 | 已实现，支持主动消息推送和心跳 | 中 |
 | [ ] | 语音消息支持 | TTS/STT集成 | 高 |
 | [ ] | 更多人格配置 | 添加更多可切换的人格模板 | 低 |
 | [ ] | 日志文件持久化 | 日志写入文件，支持历史查询 | 低 |
@@ -361,6 +361,8 @@ https://github.com/xiboliha/Dream
 
 | 完成日期 | 功能 | 说明 |
 |----------|------|------|
+| 2026-02-04 | AI情绪状态追踪 | AI根据用户情绪动态调整自身情绪，影响回复风格 |
+| 2026-02-04 | 情绪监控系统 | 情绪监控页面，支持查看和手动设置AI情绪 |
 | 2026-02-04 | 技术债务清理 | 清理测试文件、完善错误处理、配置管理优化、单元测试 |
 | 2026-02-03 | 网络搜索功能 | 必应搜索集成，支持关键词触发 |
 | 2026-02-03 | 对话示例优化 | 添加连续对话示例，优化回复语气 |
@@ -372,6 +374,77 @@ https://github.com/xiboliha/Dream
 ---
 
 ## 开发日志
+
+### 2026-02-04 会话记录（续）
+
+#### AI情绪状态追踪功能
+
+1. **AIEmotionState 系统**
+   - 创建 `src/services/emotion/ai_emotion_state.py`
+   - 定义9种AI情绪状态：happy, content, caring, playful, worried, sad, annoyed, shy, excited
+   - 实现情绪转换规则（用户情绪→AI情绪）
+   - 情绪强度追踪和衰减机制
+
+2. **情绪转换逻辑**
+   - 用户开心 → AI开心
+   - 用户难过/生气/焦虑 → AI关心
+   - 用户表达爱意 → AI害羞
+   - 用户兴奋 → AI兴奋
+   - 用户惊讶 → AI俏皮
+
+3. **对话引擎集成**
+   - 修改 `src/core/conversation/engine.py`
+   - 分析用户消息情绪
+   - 根据用户情绪更新AI情绪状态
+   - 将AI情绪注入系统提示词
+
+4. **情绪监控API**
+   - `GET /emotion/state/{user_id}` - 获取AI情绪状态
+   - `GET /emotion/history/{user_id}` - 获取情绪历史
+   - `POST /emotion/set/{user_id}` - 手动设置情绪（测试用）
+   - `GET /emotion/all` - 获取所有用户情绪状态
+   - `GET /emotion/moods` - 获取可用情绪类型
+   - `GET /emotion-monitor` - 情绪监控页面
+
+5. **情绪监控页面**
+   - 创建 `src/interfaces/web/emotion_monitor.html`
+   - 实时显示AI当前情绪和强度
+   - 情绪历史记录查看
+   - 手动设置情绪功能（测试用）
+   - 情绪分布统计
+
+#### 关键文件修改
+
+- `src/services/emotion/ai_emotion_state.py` - 新建，AI情绪状态管理
+- `src/services/emotion/__init__.py` - 导出新类
+- `src/core/conversation/engine.py` - 集成情绪分析和AI情绪
+- `src/app.py` - 添加情绪监控API
+- `src/interfaces/web/emotion_monitor.html` - 新建，情绪监控页面
+
+#### 新增API接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/emotion/state/{user_id}` | GET | 获取AI情绪状态 |
+| `/emotion/history/{user_id}` | GET | 获取情绪历史 |
+| `/emotion/set/{user_id}` | POST | 手动设置情绪 |
+| `/emotion/all` | GET | 所有用户情绪状态 |
+| `/emotion/moods` | GET | 可用情绪类型 |
+| `/emotion-monitor` | GET | 情绪监控页面 |
+
+#### AI情绪类型
+
+| 情绪 | 英文 | 描述 |
+|------|------|------|
+| 开心 | happy | 说话带着愉悦和活力 |
+| 满足 | content | 心情平静满足，说话温和自然 |
+| 关心 | caring | 温柔体贴，想要安慰和照顾对方 |
+| 俏皮 | playful | 喜欢开玩笑和调侃 |
+| 担心 | worried | 关切对方的情况 |
+| 难过 | sad | 说话比较低落 |
+| 小生气 | annoyed | 撒娇式地抱怨 |
+| 害羞 | shy | 说话比较含蓄 |
+| 兴奋 | excited | 语气更加热情 |
 
 ### 2026-02-04 会话记录
 

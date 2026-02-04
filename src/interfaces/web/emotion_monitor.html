@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI情绪监控 - Nuyoah</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 15px;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            transition: background 0.3s;
+        }
+
+        .nav-links a:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        /* 当前状态 */
+        .current-state {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .mood-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+        }
+
+        .mood-info h3 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .mood-info p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .intensity-bar {
+            width: 100%;
+            height: 8px;
+            background: #eee;
+            border-radius: 4px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .intensity-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        /* 情绪选择器 */
+        .mood-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .mood-btn {
+            padding: 8px 16px;
+            border: 2px solid #ddd;
+            border-radius: 20px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .mood-btn:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+
+        .mood-btn.active {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+
+        /* 强度滑块 */
+        .intensity-control {
+            margin: 15px 0;
+        }
+
+        .intensity-control label {
+            display: block;
+            margin-bottom: 8px;
+            color: #666;
+        }
+
+        .intensity-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: #ddd;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .intensity-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .set-mood-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .set-mood-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        /* 历史记录 */
+        .history-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .history-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            gap: 15px;
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        .history-mood {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            background: #f5f5f5;
+        }
+
+        .history-details {
+            flex: 1;
+        }
+
+        .history-details h4 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 3px;
+        }
+
+        .history-details p {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .history-time {
+            font-size: 12px;
+            color: #999;
+        }
+
+        /* 用户列表 */
+        .user-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .user-item:hover {
+            background: #f0f0ff;
+        }
+
+        .user-item.active {
+            background: #e8e8ff;
+            border: 2px solid #667eea;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #667eea;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 12px;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-info h4 {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .user-info p {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* 统计信息 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* 情绪分布 */
+        .mood-distribution {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .mood-tag {
+            padding: 4px 12px;
+            background: #f0f0ff;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #667eea;
+        }
+
+        /* 输入框 */
+        .user-id-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .user-id-input input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .user-id-input input:focus {
+            border-color: #667eea;
+        }
+
+        .user-id-input button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        /* 刷新按钮 */
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: white;
+            border: none;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            cursor: pointer;
+            font-size: 20px;
+            transition: transform 0.3s;
+        }
+
+        .refresh-btn:hover {
+            transform: rotate(180deg);
+        }
+
+        /* 情绪图标映射 */
+        .mood-happy { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); }
+        .mood-content { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }
+        .mood-caring { background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%); }
+        .mood-playful { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .mood-worried { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .mood-sad { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .mood-annoyed { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); }
+        .mood-shy { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); }
+        .mood-excited { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            color: #e74c3c;
+            padding: 10px;
+            background: #ffeaea;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI情绪监控系统</h1>
+
+        <div class="nav-links">
+            <a href="/">聊天</a>
+            <a href="/monitor">系统监控</a>
+            <a href="/emotion-monitor">情绪监控</a>
+            <a href="/docs">API文档</a>
+        </div>
+
+        <div class="grid">
+            <!-- 左侧：当前状态和控制 -->
+            <div>
+                <!-- 用户选择 -->
+                <div class="card">
+                    <h2>选择用户</h2>
+                    <div class="user-id-input">
+                        <input type="number" id="userIdInput" placeholder="输入用户ID" value="1">
+                        <button onclick="loadUserState()">查看</button>
+                    </div>
+                    <div id="userList" class="user-list">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+
+                <!-- 当前情绪状态 -->
+                <div class="card">
+                    <h2>当前AI情绪</h2>
+                    <div id="currentState" class="current-state">
+                        <div class="loading">选择用户查看情绪状态</div>
+                    </div>
+                </div>
+
+                <!-- 手动设置情绪 -->
+                <div class="card">
+                    <h2>手动设置情绪（测试用）</h2>
+                    <div id="moodSelector" class="mood-selector">
+                        <!-- 动态加载 -->
+                    </div>
+                    <div class="intensity-control">
+                        <label>情绪强度: <span id="intensityValue">0.5</span></label>
+                        <input type="range" class="intensity-slider" id="intensitySlider"
+                               min="0" max="1" step="0.1" value="0.5"
+                               oninput="document.getElementById('intensityValue').textContent = this.value">
+                    </div>
+                    <input type="text" id="triggerInput" placeholder="触发原因（可选）"
+                           style="width:100%;padding:10px;border:2px solid #ddd;border-radius:8px;margin-bottom:15px;">
+                    <button class="set-mood-btn" onclick="setMood()">设置情绪</button>
+                </div>
+            </div>
+
+            <!-- 右侧：统计和历史 -->
+            <div>
+                <!-- 统计信息 -->
+                <div class="card">
+                    <h2>情绪统计</h2>
+                    <div id="moodStats" class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="statHistoryCount">-</div>
+                            <div class="stat-label">历史记录数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statAvgIntensity">-</div>
+                            <div class="stat-label">平均强度</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statLastUpdate">-</div>
+                            <div class="stat-label">最后更新</div>
+                        </div>
+                    </div>
+                    <div id="moodDistribution" class="mood-distribution">
+                        <!-- 动态加载 -->
+                    </div>
+                </div>
+
+                <!-- 情绪历史 -->
+                <div class="card">
+                    <h2>情绪变化历史</h2>
+                    <div id="historyList" class="history-list">
+                        <div class="loading">选择用户查看历史</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="refresh()" title="刷新">&#x21bb;</button>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentUserId = 1;
+        let selectedMood = 'content';
+        let availableMoods = [];
+
+        const MOOD_ICONS = {
+            'happy': '😊',
+            'content': '😌',
+            'caring': '🥰',
+            'playful': '😜',
+            'worried': '😟',
+            'sad': '😢',
+            'annoyed': '😤',
+            'shy': '😳',
+            'excited': '🤩'
+        };
+
+        const MOOD_NAMES = {
+            'happy': '开心',
+            'content': '满足',
+            'caring': '关心',
+            'playful': '俏皮',
+            'worried': '担心',
+            'sad': '难过',
+            'annoyed': '小生气',
+            'shy': '害羞',
+            'excited': '兴奋'
+        };
+
+        // 初始化
+        async function init() {
+            await loadAvailableMoods();
+            await loadAllUsers();
+            await loadUserState();
+        }
+
+        // 加载可用情绪类型
+        async function loadAvailableMoods() {
+            try {
+                const response = await fetch(`${API_BASE}/emotion/moods`);
+                const data = await response.json();
+                availableMoods = data.moods;
+                renderMoodSelector();
+            } catch (error) {
+                console.error('Failed to load moods:', error);
+            }
+        }
+
+        // 渲染情绪选择器
+        function renderMoodSelector() {
+            const container = document.getElementById('moodSelector');
+            container.innerHTML = availableMoods.map(mood => `
+                <button class="mood-btn ${mood.value === selectedMood ? 'active' : ''}"
+                        onclick="selectMood('${mood.value}')"
+                        title="${mood.description}">
+                    ${MOOD_ICONS[mood.value] || '😐'} ${MOOD_NAMES[mood.value] || mood.value}
+                </button>
+            `).join('');
+        }
+
+        // 选择情绪
+        function selectMood(mood) {
+            selectedMood = mood;
+            renderMoodSelector();
+        }
+
+        // 加载所有用户
+        async function loadAllUsers() {
+            try {
+                const response = await fetch(`${API_BASE}/emotion/all`);
+                const data = await response.json();
+                renderUserList(data.users);
+            } catch (error) {
+                document.getElementById('userList').innerHTML = '<div class="error">加载失败</div>';
+            }
+        }
+
+        // 渲染用户列表
+        function renderUserList(users) {
+            const container = document.getElementById('userList');
+            if (Object.keys(users).length === 0) {
+                container.innerHTML = '<p style="color:#666;text-align:center;">暂无用户数据</p>';
+                return;
+            }
+            container.innerHTML = Object.entries(users).map(([userId, state]) => `
+                <div class="user-item ${userId == currentUserId ? 'active' : ''}"
+                     onclick="selectUser(${userId})">
+                    <div class="user-avatar">${userId}</div>
+                    <div class="user-info">
+                        <h4>用户 ${userId}</h4>
+                        <p>${MOOD_ICONS[state.current_mood] || '😐'} ${MOOD_NAMES[state.current_mood] || state.current_mood} (${state.mood_intensity})</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 选择用户
+        function selectUser(userId) {
+            currentUserId = userId;
+            document.getElementById('userIdInput').value = userId;
+            loadUserState();
+            loadAllUsers();
+        }
+
+        // 加载用户状态
+        async function loadUserState() {
+            currentUserId = parseInt(document.getElementById('userIdInput').value) || 1;
+
+            try {
+                // 加载当前状态
+                const stateResponse = await fetch(`${API_BASE}/emotion/state/${currentUserId}`);
+                const stateData = await stateResponse.json();
+                renderCurrentState(stateData);
+                renderStats(stateData);
+
+                // 加载历史
+                const historyResponse = await fetch(`${API_BASE}/emotion/history/${currentUserId}?limit=20`);
+                const historyData = await historyResponse.json();
+                renderHistory(historyData.history);
+
+            } catch (error) {
+                document.getElementById('currentState').innerHTML = '<div class="error">加载失败: ' + error.message + '</div>';
+            }
+        }
+
+        // 渲染当前状态
+        function renderCurrentState(state) {
+            const container = document.getElementById('currentState');
+            const mood = state.current_mood;
+            const intensity = state.mood_intensity;
+
+            container.innerHTML = `
+                <div class="mood-icon mood-${mood}">
+                    ${MOOD_ICONS[mood] || '😐'}
+                </div>
+                <div class="mood-info" style="flex:1">
+                    <h3>${MOOD_NAMES[mood] || mood}</h3>
+                    <p>强度: ${(intensity * 100).toFixed(0)}%</p>
+                    <div class="intensity-bar">
+                        <div class="intensity-fill" style="width: ${intensity * 100}%"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 渲染统计信息
+        function renderStats(state) {
+            document.getElementById('statHistoryCount').textContent = state.history_count || 0;
+            document.getElementById('statAvgIntensity').textContent =
+                state.average_intensity ? (state.average_intensity * 100).toFixed(0) + '%' : '-';
+
+            if (state.last_updated) {
+                const date = new Date(state.last_updated);
+                document.getElementById('statLastUpdate').textContent =
+                    date.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+            }
+
+            // 情绪分布
+            const distribution = state.mood_distribution || {};
+            const container = document.getElementById('moodDistribution');
+            container.innerHTML = Object.entries(distribution).map(([mood, count]) => `
+                <span class="mood-tag">${MOOD_ICONS[mood] || '😐'} ${MOOD_NAMES[mood] || mood}: ${count}</span>
+            `).join('');
+        }
+
+        // 渲染历史记录
+        function renderHistory(history) {
+            const container = document.getElementById('historyList');
+            if (!history || history.length === 0) {
+                container.innerHTML = '<p style="color:#666;text-align:center;padding:20px;">暂无历史记录</p>';
+                return;
+            }
+
+            container.innerHTML = history.map(item => {
+                const time = new Date(item.timestamp);
+                return `
+                    <div class="history-item">
+                        <div class="history-mood mood-${item.mood}">
+                            ${MOOD_ICONS[item.mood] || '😐'}
+                        </div>
+                        <div class="history-details">
+                            <h4>${MOOD_NAMES[item.mood] || item.mood} (${(item.intensity * 100).toFixed(0)}%)</h4>
+                            <p>${item.trigger || '无触发原因'}</p>
+                            ${item.user_emotion ? `<p style="color:#667eea">用户情绪: ${item.user_emotion}</p>` : ''}
+                        </div>
+                        <div class="history-time">
+                            ${time.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 设置情绪
+        async function setMood() {
+            const intensity = parseFloat(document.getElementById('intensitySlider').value);
+            const trigger = document.getElementById('triggerInput').value || '手动设置';
+
+            try {
+                const response = await fetch(`${API_BASE}/emotion/set/${currentUserId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        mood: selectedMood,
+                        intensity: intensity,
+                        trigger: trigger
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert('设置失败: ' + (error.message || '未知错误'));
+                    return;
+                }
+
+                // 刷新显示
+                await loadUserState();
+                await loadAllUsers();
+                document.getElementById('triggerInput').value = '';
+
+            } catch (error) {
+                alert('设置失败: ' + error.message);
+            }
+        }
+
+        // 刷新
+        async function refresh() {
+            await loadAllUsers();
+            await loadUserState();
+        }
+
+        // 自动刷新
+        setInterval(refresh, 10000);
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>

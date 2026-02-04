@@ -700,6 +700,102 @@ async def get_proactive_settings():
     }
 
 
+# ============ 情绪监控 API ============
+
+class SetMoodRequest(BaseModel):
+    """Request to manually set AI mood."""
+    mood: str
+    intensity: float = 0.5
+    trigger: str = "手动设置"
+
+
+@app.get("/emotion/state/{user_id}")
+async def get_emotion_state(user_id: int):
+    """获取指定用户的AI情绪状态。"""
+    from src.services.emotion import get_ai_emotion_manager
+
+    manager = get_ai_emotion_manager()
+    stats = manager.get_mood_stats(user_id)
+    return stats
+
+
+@app.get("/emotion/history/{user_id}")
+async def get_emotion_history(user_id: int, limit: int = 20):
+    """获取指定用户的AI情绪历史。"""
+    from src.services.emotion import get_ai_emotion_manager
+
+    manager = get_ai_emotion_manager()
+    history = manager.get_recent_history(user_id, limit=limit)
+    return {"user_id": user_id, "history": history}
+
+
+@app.post("/emotion/set/{user_id}")
+async def set_emotion_state(user_id: int, request: SetMoodRequest):
+    """手动设置AI情绪状态（用于测试）。"""
+    from src.services.emotion import get_ai_emotion_manager, AIMood
+
+    manager = get_ai_emotion_manager()
+
+    # Validate mood
+    try:
+        mood = AIMood(request.mood)
+    except ValueError:
+        valid_moods = [m.value for m in AIMood]
+        raise ValidationError(
+            f"Invalid mood: {request.mood}. Valid moods: {valid_moods}",
+            user_message=f"无效的情绪类型，可选: {', '.join(valid_moods)}"
+        )
+
+    state = manager.set_mood(
+        user_id,
+        mood=mood,
+        intensity=request.intensity,
+        trigger=request.trigger,
+    )
+
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "current_mood": state.current_mood.value,
+        "mood_intensity": state.mood_intensity,
+    }
+
+
+@app.get("/emotion/all")
+async def get_all_emotion_states():
+    """获取所有用户的AI情绪状态（用于监控）。"""
+    from src.services.emotion import get_ai_emotion_manager
+
+    manager = get_ai_emotion_manager()
+    all_states = manager.get_all_user_states()
+    return {"users": all_states, "count": len(all_states)}
+
+
+@app.get("/emotion/moods")
+async def get_available_moods():
+    """获取所有可用的AI情绪类型。"""
+    from src.services.emotion import AIMood
+    from src.services.emotion.ai_emotion_state import AIEmotionManager
+
+    manager = AIEmotionManager()
+    moods = []
+    for mood in AIMood:
+        moods.append({
+            "value": mood.value,
+            "description": manager.MOOD_DESCRIPTIONS.get(mood, ""),
+        })
+    return {"moods": moods}
+
+
+@app.get("/emotion-monitor")
+async def serve_emotion_monitor_page():
+    """Serve the emotion monitor page."""
+    html_path = Path(__file__).parent / "interfaces" / "web" / "emotion_monitor.html"
+    if html_path.exists():
+        return FileResponse(html_path)
+    raise HTTPException(status_code=404, detail="Emotion monitor page not found")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
