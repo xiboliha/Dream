@@ -104,11 +104,59 @@ class TestExceptions:
         with pytest.raises(AIGFException):
             raise AIGFException("Test error")
 
+    def test_aigf_exception_to_dict(self):
+        """Test exception to_dict method."""
+        from src.utils.exceptions import AIGFException
+        exc = AIGFException("Test error", user_message="用户友好消息")
+        result = exc.to_dict()
+        assert result["error"] is True
+        assert result["error_code"] == "INTERNAL_ERROR"
+        assert result["message"] == "用户友好消息"
+
     def test_ai_service_error(self):
         """Test AI service error."""
         from src.utils.exceptions import AIServiceError
+        exc = AIServiceError("AI error")
+        assert exc.status_code == 503
+        assert exc.error_code == "AI_SERVICE_ERROR"
         with pytest.raises(AIServiceError):
-            raise AIServiceError("AI error")
+            raise exc
+
+    def test_rate_limit_error(self):
+        """Test rate limit error."""
+        from src.utils.exceptions import RateLimitExceeded
+        exc = RateLimitExceeded("Too many requests")
+        assert exc.status_code == 429
+        assert exc.error_code == "RATE_LIMIT_EXCEEDED"
+
+    def test_user_not_found_error(self):
+        """Test user not found error."""
+        from src.utils.exceptions import UserNotFound
+        exc = UserNotFound("User 123 not found")
+        assert exc.status_code == 404
+        assert exc.error_code == "USER_NOT_FOUND"
+
+    def test_service_unavailable_error(self):
+        """Test service unavailable error."""
+        from src.utils.exceptions import ServiceUnavailableError
+        exc = ServiceUnavailableError("Service not ready")
+        assert exc.status_code == 503
+        assert exc.error_code == "SERVICE_UNAVAILABLE"
+
+    def test_rag_service_error(self):
+        """Test RAG service error."""
+        from src.utils.exceptions import RAGServiceError
+        exc = RAGServiceError("RAG not initialized")
+        assert exc.status_code == 503
+        assert exc.error_code == "RAG_SERVICE_ERROR"
+
+    def test_configuration_error(self):
+        """Test configuration error."""
+        from src.utils.exceptions import ConfigurationError
+        exc = ConfigurationError("Missing API key", user_message="请配置API密钥")
+        assert exc.status_code == 500
+        assert exc.error_code == "CONFIG_ERROR"
+        assert exc.user_message == "请配置API密钥"
 
     def test_memory_error(self):
         """Test memory error."""

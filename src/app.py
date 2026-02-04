@@ -5,14 +5,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
 from config.settings import settings
+from src.utils.exceptions import (
+    AIGFException,
+    ServiceUnavailableError,
+    AIServiceError,
+    RAGServiceError,
+    UserNotFound,
+    ValidationError,
+)
 
 
 class ChatRequest(BaseModel):
@@ -210,6 +218,32 @@ app.add_middleware(
 )
 
 
+# Global exception handlers
+@app.exception_handler(AIGFException)
+async def aigf_exception_handler(request: Request, exc: AIGFException):
+    """Handle all custom AIGF exceptions."""
+    logger.error(f"AIGF Exception: {exc.error_code} - {exc.message}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected exceptions."""
+    logger.exception(f"Unexpected error: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "error_code": "INTERNAL_ERROR",
+            "message": "服务器内部错误，请稍后再试",
+            "detail": str(exc) if settings.debug else None,
+        },
+    )
+
+
 # Mount static assets directory
 assets_path = Path(__file__).parent / "interfaces" / "web" / "assets"
 if assets_path.exists():
@@ -245,7 +279,7 @@ async def chat(request: ChatRequest):
     global _conversation_engine, _proactive_service
 
     if not _conversation_engine:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        raise ServiceUnavailableError("Conversation engine not initialized")
 
     try:
         from src.services.storage import get_database_service
@@ -287,9 +321,11 @@ async def chat(request: ChatRequest):
             typing_delay=result.get("typing_delay", 1.0),
         )
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise AIServiceError(f"Failed to process message: {e}")
 
 
 @app.get("/users/{user_id}/status", response_model=UserStatusResponse)
@@ -314,9 +350,11 @@ async def get_user_status(user_id: int):
             consecutive_days=metrics.consecutive_days,
         )
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Get user status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise UserNotFound(f"Failed to get user status: {e}")
 
 
 @app.get("/users/{user_id}/memories")
@@ -359,9 +397,11 @@ async def get_user_memories(user_id: int, limit: int = 20):
             ],
         }
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Get memories error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise UserNotFound(f"Failed to get user memories: {e}")
 
 
 @app.get("/personalities")
@@ -390,7 +430,7 @@ async def get_greeting(user_id: int):
     global _conversation_engine
 
     if not _conversation_engine:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        raise ServiceUnavailableError("Conversation engine not initialized")
 
     try:
         from src.services.storage import get_database_service
@@ -409,9 +449,11 @@ async def get_greeting(user_id: int):
 
         return {"greeting": greeting}
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Get greeting error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise AIServiceError(f"Failed to generate greeting: {e}")
 
 
 # WebSocket endpoint for real-time messaging
@@ -472,7 +514,7 @@ async def add_dialogue(request: DialogueAddRequest):
     global _dialogue_rag
 
     if not _dialogue_rag:
-        raise HTTPException(status_code=503, detail="RAG service not available")
+        raise RAGServiceError("RAG service not initialized")
 
     try:
         success = await _dialogue_rag.add_dialogue(
@@ -486,11 +528,13 @@ async def add_dialogue(request: DialogueAddRequest):
         if success:
             return {"status": "success", "index_size": _dialogue_rag.index_size}
         else:
-            raise HTTPException(status_code=500, detail="Failed to add dialogue")
+            raise RAGServiceError("Failed to add dialogue to index")
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Add dialogue error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise RAGServiceError(f"Failed to add dialogue: {e}")
 
 
 @app.post("/rag/dialogues/batch")
@@ -499,7 +543,7 @@ async def add_dialogues_batch(request: DialogueBatchAddRequest):
     global _dialogue_rag
 
     if not _dialogue_rag:
-        raise HTTPException(status_code=503, detail="RAG service not available")
+        raise RAGServiceError("RAG service not initialized")
 
     try:
         dialogues = [d.model_dump() for d in request.dialogues]
@@ -511,9 +555,11 @@ async def add_dialogues_batch(request: DialogueBatchAddRequest):
             "index_size": _dialogue_rag.index_size,
         }
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Batch add dialogues error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise RAGServiceError(f"Failed to batch add dialogues: {e}")
 
 
 @app.get("/rag/stats")
@@ -533,15 +579,17 @@ async def search_dialogues(query: str, top_k: int = 5, threshold: float = 0.5):
     global _dialogue_rag
 
     if not _dialogue_rag:
-        raise HTTPException(status_code=503, detail="RAG service not available")
+        raise RAGServiceError("RAG service not initialized")
 
     try:
         results = await _dialogue_rag.search(query, top_k, threshold)
         return {"query": query, "results": results}
 
+    except AIGFException:
+        raise
     except Exception as e:
         logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise RAGServiceError(f"Search failed: {e}")
 
 
 # ============ 日志监控 API ============

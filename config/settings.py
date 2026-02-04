@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     # Qianwen (Aliyun DashScope)
     qianwen_api_key: Optional[str] = None
-    qianwen_model: str = "deepseek-v3"
+    qianwen_model: str = "glm-4.7"
 
     # Wenxin (Baidu)
     wenxin_api_key: Optional[str] = None
@@ -130,31 +130,78 @@ class Settings(BaseSettings):
             return Path(base) / "data" / "logs"
         return Path(v)
 
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v):
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if v.upper() not in valid_levels:
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
+        return v.upper()
+
+    @field_validator("rag_backend")
+    @classmethod
+    def validate_rag_backend(cls, v):
+        valid_backends = ["faiss", "qdrant"]
+        if v.lower() not in valid_backends:
+            raise ValueError(f"Invalid RAG backend: {v}. Must be one of {valid_backends}")
+        return v.lower()
+
     def get_ai_api_key(self) -> str:
-        """Get the API key for the current AI provider."""
+        """Get the API key for the current AI provider.
+
+        Raises:
+            ConfigurationError: If API key is not configured
+        """
+        from src.utils.exceptions import ConfigurationError
+
         if self.ai_provider == AIProvider.OPENAI:
             if not self.openai_api_key:
-                raise ValueError("OpenAI API key not configured")
+                raise ConfigurationError(
+                    "OpenAI API key not configured",
+                    user_message="请配置 OPENAI_API_KEY 环境变量"
+                )
             return self.openai_api_key
         elif self.ai_provider == AIProvider.QIANWEN:
             if not self.qianwen_api_key:
-                raise ValueError("Qianwen API key not configured")
+                raise ConfigurationError(
+                    "Qianwen API key not configured",
+                    user_message="请配置 QIANWEN_API_KEY 环境变量"
+                )
             return self.qianwen_api_key
         elif self.ai_provider == AIProvider.WENXIN:
             if not self.wenxin_api_key:
-                raise ValueError("Wenxin API key not configured")
+                raise ConfigurationError(
+                    "Wenxin API key not configured",
+                    user_message="请配置 WENXIN_API_KEY 环境变量"
+                )
             return self.wenxin_api_key
-        raise ValueError(f"Unknown AI provider: {self.ai_provider}")
+        raise ConfigurationError(
+            f"Unknown AI provider: {self.ai_provider}",
+            user_message="不支持的AI服务提供商"
+        )
 
     def get_ai_model(self) -> str:
         """Get the model name for the current AI provider."""
+        from src.utils.exceptions import ConfigurationError
+
         if self.ai_provider == AIProvider.OPENAI:
             return self.openai_model
         elif self.ai_provider == AIProvider.QIANWEN:
             return self.qianwen_model
         elif self.ai_provider == AIProvider.WENXIN:
             return self.wenxin_model
-        raise ValueError(f"Unknown AI provider: {self.ai_provider}")
+        raise ConfigurationError(
+            f"Unknown AI provider: {self.ai_provider}",
+            user_message="不支持的AI服务提供商"
+        )
+
+    def is_production(self) -> bool:
+        """Check if running in production environment."""
+        return self.environment == Environment.PRODUCTION
+
+    def is_development(self) -> bool:
+        """Check if running in development environment."""
+        return self.environment == Environment.DEVELOPMENT
 
 
 @lru_cache()
