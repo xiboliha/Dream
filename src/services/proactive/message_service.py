@@ -96,22 +96,20 @@ class ProactiveMessageService:
             # 突然想起
             ["对了", "你上次说的那个事怎么样了"],
             ["诶", "我突然想起来一件事"],
-            # 撒娇
-            ["哼", "你都不理我"],
-            ["无聊", "陪我聊天"],
+            # 撒娇 (温和版)
+            ["好无聊", "陪我聊天嘛"],
+            ["在干嘛呀"],
         ]
 
-        # Idle reminder templates (when user hasn't replied) - 支持多条
+        # Idle reminder templates (when user hasn't replied) - 温和友好版
         self._idle_templates = [
             ["在干嘛呢"],
-            ["怎么不说话了"],
-            ["人呢"],
+            ["忙完了吗"],
             ["忙吗"],
-            ["..."],
-            ["哼"],
-            ["你是不是把我忘了"],
-            ["在吗", "怎么不回我"],
-            ["...", "不理我吗"],
+            ["有空吗"],
+            ["在忙什么呀"],
+            ["想你了"],
+            ["好久没聊了"],
         ]
 
         # Idle threshold in minutes

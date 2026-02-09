@@ -44,6 +44,10 @@ class ChatResponse(BaseModel):
     session_id: str
     emotion_detected: Optional[str] = None
     typing_delay: float = 1.0
+    # Buffering support
+    buffering: bool = False  # True if message is being buffered
+    buffer_count: int = 0    # Number of messages in buffer
+    buffered_count: int = 0  # Number of messages that were combined
 
 
 class UserStatusResponse(BaseModel):
@@ -70,6 +74,7 @@ _conversation_engine = None
 _coordinator = None
 _dialogue_rag = None
 _proactive_service = None
+_message_buffer = None
 
 
 @asynccontextmanager
@@ -186,6 +191,15 @@ async def lifespan(app: FastAPI):
     _proactive_service.set_services(ai_service, get_database_service())
     _proactive_service.start()
 
+    # Initialize message buffer service
+    from src.services.chat import init_message_buffer
+    _message_buffer = init_message_buffer(
+        buffer_timeout=3.0,  # 等待3秒收集更多消息
+        max_buffer_size=10,  # 最多缓冲10条
+        max_wait_time=10.0,  # 最长等待10秒
+    )
+    logger.info("Message buffer service initialized")
+
     logger.info("API initialization complete")
 
     yield
@@ -275,8 +289,12 @@ async def health_check():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Send a chat message and get response."""
-    global _conversation_engine, _proactive_service
+    """Send a chat message and get response.
+
+    Supports message buffering: when user sends multiple messages quickly,
+    they are combined and processed together after a short delay.
+    """
+    global _conversation_engine, _proactive_service, _message_buffer
 
     if not _conversation_engine:
         raise ServiceUnavailableError("Conversation engine not initialized")
@@ -294,30 +312,85 @@ async def chat(request: ChatRequest):
         if _proactive_service:
             _proactive_service.update_user_activity(request.user_id)
 
-        async with db.get_async_session() as session:
-            # Analyze emotion
-            emotion_result = emotion_analyzer.analyze(request.message)
+        # Define the actual message processing function
+        async def process_message_internal(user_id: int, message: str, message_type: str):
+            async with db.get_async_session() as session:
+                # Analyze emotion
+                emotion_result = emotion_analyzer.analyze(message)
 
-            # Get personality config
-            personality_config = personality_system.get_personality_for_user(
-                request.user_id
-            )
+                # Get personality config
+                personality_config = personality_system.get_personality_for_user(user_id)
 
-            # Process message
-            result = await _conversation_engine.process_message(
-                session=session,
+                # Process message
+                result = await _conversation_engine.process_message(
+                    session=session,
+                    user_id=user_id,
+                    message_content=message,
+                    message_type=message_type,
+                    personality_config=personality_config,
+                )
+
+                return {
+                    "response": result["response"],
+                    "messages": result.get("messages", []),
+                    "conversation_id": result["conversation_id"],
+                    "session_id": result["session_id"],
+                    "emotion_detected": emotion_result.primary_emotion.value,
+                    "typing_delay": result.get("typing_delay", 1.0),
+                }
+
+        # Use message buffer if available
+        if _message_buffer:
+            _message_buffer.set_process_callback(process_message_internal)
+            buffer_result = await _message_buffer.add_message(
                 user_id=request.user_id,
-                message_content=request.message,
+                message=request.message,
                 message_type=request.message_type,
-                personality_config=personality_config,
             )
+
+            # If this is a subsequent message that was buffered, return buffered status
+            # The first message's request will wait and return the combined result
+            if buffer_result.get("status") == "buffered":
+                return ChatResponse(
+                    response="",
+                    messages=[],
+                    conversation_id=0,
+                    session_id="buffered",
+                    emotion_detected=None,
+                    typing_delay=0,
+                    buffering=True,
+                    buffer_count=buffer_result.get("buffer_count", 1),
+                )
+
+            # First message waited and got the result, or error occurred
+            if "response" in buffer_result:
+                return ChatResponse(
+                    response=buffer_result["response"],
+                    messages=[MessageItem(**m) for m in buffer_result.get("messages", [])],
+                    conversation_id=buffer_result.get("conversation_id", 0),
+                    session_id=buffer_result.get("session_id", ""),
+                    emotion_detected=buffer_result.get("emotion_detected"),
+                    typing_delay=buffer_result.get("typing_delay", 1.0),
+                    buffered_count=buffer_result.get("buffered_count", 1),
+                )
+
+            # Error case
+            if buffer_result.get("status") == "error":
+                raise AIServiceError(buffer_result.get("message", "Buffer processing failed"))
+
+        # Fallback: process directly without buffering
+        result = await process_message_internal(
+            request.user_id,
+            request.message,
+            request.message_type,
+        )
 
         return ChatResponse(
             response=result["response"],
             messages=[MessageItem(**m) for m in result.get("messages", [])],
             conversation_id=result["conversation_id"],
             session_id=result["session_id"],
-            emotion_detected=emotion_result.primary_emotion.value,
+            emotion_detected=result.get("emotion_detected"),
             typing_delay=result.get("typing_delay", 1.0),
         )
 

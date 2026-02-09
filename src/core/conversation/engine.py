@@ -147,18 +147,83 @@ class ConversationEngine:
         filtered = re.sub(r'\s{2,}', ' ', filtered)
         filtered = re.sub(r'\n{2,}', '\n', filtered)
         filtered = re.sub(r'^[\s\-\.]+$', '', filtered, flags=re.MULTILINE)
-        # Remove trailing ellipsis (模型经常在末尾加...)
+        # Remove ellipsis at beginning and end (模型经常加...)
+        filtered = re.sub(r'^\.{2,}\s*', '', filtered)
+        filtered = re.sub(r'^…+\s*', '', filtered)
         filtered = re.sub(r'\.{2,}$', '', filtered)
         filtered = re.sub(r'…+$', '', filtered)
+        # Remove standalone ellipsis
+        filtered = re.sub(r'^[\.\…]+$', '', filtered)
         filtered = filtered.strip()
 
-        # If filtered result is garbage or too short, return a fallback
+        # If filtered result is garbage or too short, return None to trigger re-generation
+        # or use context-aware fallback
         if not filtered or len(filtered) < 2 or filtered.count('"') > 2:
-            import random
-            fallbacks = ["在呢", "怎么了", "说啥", "？", "然后呢"]
-            return random.choice(fallbacks)
+            return None  # Return None to signal need for fallback
 
         return filtered
+
+    def _get_context_aware_fallback(self, user_message: str) -> str:
+        """Generate context-aware fallback response based on user message.
+
+        Args:
+            user_message: The user's message
+
+        Returns:
+            Appropriate fallback response
+        """
+        import random
+
+        msg_lower = user_message.lower()
+
+        # Question patterns
+        if any(q in user_message for q in ['吗', '？', '?', '什么', '怎么', '为什么', '哪', '谁', '多少']):
+            return random.choice([
+                "嗯，让我想想",
+                "这个嘛",
+                "你说呢",
+                "我也不太确定诶",
+            ])
+
+        # Greeting patterns
+        if any(g in msg_lower for g in ['早', '晚安', '你好', '在吗', 'hi', 'hello']):
+            return random.choice([
+                "在呢",
+                "嗯嗯",
+                "来啦",
+            ])
+
+        # Emotional patterns
+        if any(e in user_message for e in ['难过', '伤心', '哭', '烦', '累', '不开心']):
+            return random.choice([
+                "怎么了",
+                "发生什么事了",
+                "跟我说说",
+            ])
+
+        # Excitement patterns
+        if any(e in user_message for e in ['哈哈', '！！', '好棒', '太好了', '开心']):
+            return random.choice([
+                "哈哈",
+                "是吗",
+                "真的吗",
+            ])
+
+        # Statement/sharing patterns
+        if any(s in user_message for s in ['了', '的', '呢', '啊', '吧']):
+            return random.choice([
+                "嗯嗯",
+                "是嘛",
+                "哦哦",
+                "然后呢",
+            ])
+
+        # Default fallback
+        return random.choice([
+            "嗯",
+            "嗯嗯",
+            "哦",
+        ])
 
     async def _check_and_get_weather(self, user_message: str) -> Optional[str]:
         """Check if user is asking about weather and fetch if needed.
@@ -672,6 +737,11 @@ class ConversationEngine:
 
             # Filter out kaomoji and excessive emoji
             filtered_content = self._filter_response(response.content)
+
+            # If filter returned None, use context-aware fallback
+            if filtered_content is None:
+                filtered_content = self._get_context_aware_fallback(user_message)
+
             return filtered_content
 
         except asyncio.TimeoutError:

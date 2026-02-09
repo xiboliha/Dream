@@ -24,6 +24,71 @@ class EmotionType(str, Enum):
     CONFUSED = "confused"
 
 
+class EmotionDimensions(BaseModel):
+    """VAD情绪维度模型 (Valence-Arousal-Dominance)
+
+    - valence: 效价，情绪的正负性 (-1=消极, 0=中性, +1=积极)
+    - arousal: 唤醒度，情绪的激活程度 (0=平静, 1=激动)
+    - dominance: 支配感，控制感程度 (0=被动/无力, 1=主动/掌控)
+    """
+    valence: float = Field(default=0.0, ge=-1, le=1)
+    arousal: float = Field(default=0.5, ge=0, le=1)
+    dominance: float = Field(default=0.5, ge=0, le=1)
+
+    def describe(self) -> str:
+        """生成情绪维度的自然语言描述"""
+        parts = []
+
+        # 效价描述
+        if self.valence > 0.3:
+            parts.append("积极")
+        elif self.valence < -0.3:
+            parts.append("消极")
+        else:
+            parts.append("中性")
+
+        # 唤醒度描述
+        if self.arousal > 0.7:
+            parts.append("激动")
+        elif self.arousal < 0.3:
+            parts.append("平静")
+        else:
+            parts.append("适中")
+
+        # 支配感描述
+        if self.dominance > 0.7:
+            parts.append("自信")
+        elif self.dominance < 0.3:
+            parts.append("无力")
+
+        return "、".join(parts)
+
+    def blend(self, other: "EmotionDimensions", weight: float = 0.5) -> "EmotionDimensions":
+        """混合两个情绪维度"""
+        return EmotionDimensions(
+            valence=self.valence * (1 - weight) + other.valence * weight,
+            arousal=self.arousal * (1 - weight) + other.arousal * weight,
+            dominance=self.dominance * (1 - weight) + other.dominance * weight,
+        )
+
+
+# 每种离散情绪对应的VAD维度值
+EMOTION_TO_VAD: Dict[EmotionType, EmotionDimensions] = {
+    EmotionType.HAPPY: EmotionDimensions(valence=0.8, arousal=0.6, dominance=0.7),
+    EmotionType.SAD: EmotionDimensions(valence=-0.7, arousal=0.3, dominance=0.2),
+    EmotionType.ANGRY: EmotionDimensions(valence=-0.6, arousal=0.8, dominance=0.7),
+    EmotionType.ANXIOUS: EmotionDimensions(valence=-0.5, arousal=0.7, dominance=0.2),
+    EmotionType.SURPRISED: EmotionDimensions(valence=0.2, arousal=0.8, dominance=0.4),
+    EmotionType.FEARFUL: EmotionDimensions(valence=-0.7, arousal=0.8, dominance=0.1),
+    EmotionType.DISGUSTED: EmotionDimensions(valence=-0.6, arousal=0.5, dominance=0.6),
+    EmotionType.NEUTRAL: EmotionDimensions(valence=0.0, arousal=0.3, dominance=0.5),
+    EmotionType.LOVING: EmotionDimensions(valence=0.9, arousal=0.5, dominance=0.5),
+    EmotionType.EXCITED: EmotionDimensions(valence=0.7, arousal=0.9, dominance=0.6),
+    EmotionType.TIRED: EmotionDimensions(valence=-0.3, arousal=0.1, dominance=0.3),
+    EmotionType.CONFUSED: EmotionDimensions(valence=-0.2, arousal=0.4, dominance=0.2),
+}
+
+
 class EmotionResult(BaseModel):
     """Result of emotion analysis."""
     primary_emotion: EmotionType = EmotionType.NEUTRAL
@@ -31,6 +96,12 @@ class EmotionResult(BaseModel):
     secondary_emotion: Optional[EmotionType] = None
     confidence: float = Field(default=0.5, ge=0, le=1)
     keywords_found: List[str] = Field(default_factory=list)
+    # 新增：情绪维度
+    dimensions: EmotionDimensions = Field(default_factory=EmotionDimensions)
+
+    def get_dimension_description(self) -> str:
+        """获取情绪维度描述"""
+        return self.dimensions.describe()
 
 
 class EmotionAnalyzer:
@@ -143,12 +214,62 @@ class EmotionAnalyzer:
         # Calculate confidence based on match count and text length
         confidence = min(0.5 + primary_count * 0.15, 0.95)
 
+        # 计算情绪维度 (VAD)
+        dimensions = self._calculate_dimensions(
+            sorted_emotions, intensity
+        )
+
         return EmotionResult(
             primary_emotion=primary_emotion,
             intensity=intensity,
             secondary_emotion=secondary_emotion,
             confidence=confidence,
             keywords_found=primary_keywords,
+            dimensions=dimensions,
+        )
+
+    def _calculate_dimensions(
+        self,
+        sorted_emotions: List[Tuple[EmotionType, Tuple[int, List[str]]]],
+        intensity: float
+    ) -> EmotionDimensions:
+        """计算复合情绪的VAD维度值
+
+        通过加权混合多种检测到的情绪来计算最终维度值
+
+        Args:
+            sorted_emotions: 按匹配数排序的情绪列表
+            intensity: 情绪强度
+
+        Returns:
+            EmotionDimensions 复合情绪维度
+        """
+        if not sorted_emotions:
+            return EMOTION_TO_VAD[EmotionType.NEUTRAL]
+
+        # 计算总权重
+        total_weight = sum(count for _, (count, _) in sorted_emotions)
+
+        # 加权混合各情绪的VAD值
+        valence = 0.0
+        arousal = 0.0
+        dominance = 0.0
+
+        for emotion, (count, _) in sorted_emotions:
+            weight = count / total_weight
+            base_vad = EMOTION_TO_VAD.get(emotion, EMOTION_TO_VAD[EmotionType.NEUTRAL])
+
+            valence += base_vad.valence * weight
+            arousal += base_vad.arousal * weight
+            dominance += base_vad.dominance * weight
+
+        # 根据强度调整唤醒度
+        arousal = arousal * (0.5 + intensity * 0.5)
+
+        return EmotionDimensions(
+            valence=round(max(-1, min(1, valence)), 2),
+            arousal=round(max(0, min(1, arousal)), 2),
+            dominance=round(max(0, min(1, dominance)), 2),
         )
 
     def _adjust_intensity(self, text: str, base_intensity: float) -> float:

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from loguru import logger
 
-from src.services.emotion.analyzer import EmotionType, EmotionResult
+from src.services.emotion.analyzer import EmotionType, EmotionResult, EmotionDimensions
 
 
 class AIMood(str, Enum):
@@ -22,12 +22,28 @@ class AIMood(str, Enum):
     EXCITED = "excited"      # 兴奋
 
 
+# AI情绪的VAD维度映射
+AI_MOOD_TO_VAD: Dict[AIMood, EmotionDimensions] = {
+    AIMood.HAPPY: EmotionDimensions(valence=0.8, arousal=0.6, dominance=0.6),
+    AIMood.CONTENT: EmotionDimensions(valence=0.3, arousal=0.3, dominance=0.5),
+    AIMood.CARING: EmotionDimensions(valence=0.6, arousal=0.4, dominance=0.6),
+    AIMood.PLAYFUL: EmotionDimensions(valence=0.7, arousal=0.7, dominance=0.6),
+    AIMood.WORRIED: EmotionDimensions(valence=-0.2, arousal=0.5, dominance=0.3),
+    AIMood.SAD: EmotionDimensions(valence=-0.5, arousal=0.3, dominance=0.3),
+    AIMood.ANNOYED: EmotionDimensions(valence=-0.3, arousal=0.6, dominance=0.5),
+    AIMood.SHY: EmotionDimensions(valence=0.4, arousal=0.4, dominance=0.2),
+    AIMood.EXCITED: EmotionDimensions(valence=0.7, arousal=0.9, dominance=0.6),
+}
+
+
 class MoodHistoryEntry(BaseModel):
     """Single entry in mood history."""
     mood: AIMood
     intensity: float = Field(ge=0, le=1)
     trigger: str  # What caused this mood change
     user_emotion: Optional[EmotionType] = None
+    # 新增：记录维度值
+    dimensions: Optional[EmotionDimensions] = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -38,9 +54,20 @@ class AIEmotionState(BaseModel):
     mood_history: List[MoodHistoryEntry] = Field(default_factory=list)
     last_updated: datetime = Field(default_factory=datetime.now)
 
+    # 新增：AI的情绪维度状态
+    dimensions: EmotionDimensions = Field(
+        default_factory=lambda: EmotionDimensions(valence=0.3, arousal=0.3, dominance=0.5)
+    )
+
     # Mood decay settings
     decay_rate: float = 0.1  # How fast mood returns to baseline per interaction
     baseline_mood: AIMood = AIMood.CONTENT
+    baseline_dimensions: EmotionDimensions = Field(
+        default_factory=lambda: EmotionDimensions(valence=0.3, arousal=0.3, dominance=0.5)
+    )
+
+    # Mood transition settings - controls how fast mood changes
+    transition_rate: float = 0.3  # 0.3 means 30% towards target, 70% keep current
 
     class Config:
         arbitrary_types_allowed = True
@@ -135,16 +162,24 @@ class AIEmotionManager:
             (AIMood.CONTENT, 0.5)
         )
 
-        # Calculate new intensity based on user emotion intensity
-        new_intensity = min(
+        # Calculate target intensity based on user emotion intensity
+        target_intensity = min(
             user_emotion.intensity * intensity_mod + 0.2,
             1.0
         )
 
-        # Apply mood decay towards baseline if same mood
+        # Smooth transition: blend current intensity with target
+        # transition_rate controls how fast we move towards target (0.3 = 30% towards target)
         if new_mood == state.current_mood:
-            # Reinforce current mood
-            new_intensity = min(state.mood_intensity + 0.1, 1.0)
+            # Same mood: gradual intensity change
+            new_intensity = state.mood_intensity + (target_intensity - state.mood_intensity) * state.transition_rate
+        else:
+            # Different mood: slower transition, keep more of current intensity
+            new_intensity = state.mood_intensity + (target_intensity - state.mood_intensity) * (state.transition_rate * 0.7)
+
+        # 计算AI情绪维度：基于用户情绪维度进行响应式转换
+        target_dimensions = self._calculate_ai_dimensions(user_emotion, new_mood)
+        new_dimensions = state.dimensions.blend(target_dimensions, state.transition_rate)
 
         # Record history
         history_entry = MoodHistoryEntry(
@@ -152,6 +187,7 @@ class AIEmotionManager:
             intensity=new_intensity,
             trigger=context or f"用户情绪: {user_emotion.primary_emotion.value}",
             user_emotion=user_emotion.primary_emotion,
+            dimensions=new_dimensions,
             timestamp=datetime.now(),
         )
 
@@ -164,14 +200,64 @@ class AIEmotionManager:
         # Update state
         state.current_mood = new_mood
         state.mood_intensity = round(new_intensity, 2)
+        state.dimensions = new_dimensions
         state.last_updated = datetime.now()
 
         logger.debug(
             f"AI mood updated for user {user_id}: "
-            f"{new_mood.value} (intensity: {new_intensity:.2f})"
+            f"{new_mood.value} (intensity: {new_intensity:.2f}, "
+            f"VAD: {new_dimensions.valence:.2f}/{new_dimensions.arousal:.2f}/{new_dimensions.dominance:.2f})"
         )
 
         return state
+
+    def _calculate_ai_dimensions(
+        self,
+        user_emotion: EmotionResult,
+        ai_mood: AIMood
+    ) -> EmotionDimensions:
+        """计算AI的情绪维度，基于用户情绪进行响应式转换
+
+        AI的情绪维度会受用户情绪影响，但有自己的响应模式：
+        - 用户消极时，AI保持积极但降低唤醒度（安慰模式）
+        - 用户积极时，AI共鸣但稍微收敛（不过度兴奋）
+        - AI的支配感保持稳定（作为支持者角色）
+
+        Args:
+            user_emotion: 用户情绪分析结果
+            ai_mood: AI的目标情绪类型
+
+        Returns:
+            EmotionDimensions AI的目标情绪维度
+        """
+        user_dims = user_emotion.dimensions
+        base_ai_dims = AI_MOOD_TO_VAD.get(ai_mood, AI_MOOD_TO_VAD[AIMood.CONTENT])
+
+        # AI效价：倾向积极，但会受用户影响
+        # 用户消极时AI保持温和积极，用户积极时AI共鸣
+        if user_dims.valence < 0:
+            # 用户消极：AI保持积极但不过度
+            ai_valence = max(0.3, base_ai_dims.valence * 0.8)
+        else:
+            # 用户积极：AI共鸣但稍收敛
+            ai_valence = base_ai_dims.valence * 0.9 + user_dims.valence * 0.1
+
+        # AI唤醒度：与用户情绪强度相关，但更平稳
+        # 用户激动时AI稍微跟随，用户平静时AI也平静
+        ai_arousal = base_ai_dims.arousal * 0.7 + user_dims.arousal * 0.3
+
+        # AI支配感：保持稳定的支持者角色
+        # 用户无力时AI稍微主动，用户自信时AI配合
+        if user_dims.dominance < 0.3:
+            ai_dominance = min(0.7, base_ai_dims.dominance + 0.1)
+        else:
+            ai_dominance = base_ai_dims.dominance
+
+        return EmotionDimensions(
+            valence=round(max(-1, min(1, ai_valence)), 2),
+            arousal=round(max(0, min(1, ai_arousal)), 2),
+            dominance=round(max(0, min(1, ai_dominance)), 2),
+        )
 
     def set_mood(
         self,
@@ -193,16 +279,21 @@ class AIEmotionManager:
         """
         state = self.get_state(user_id)
 
+        # 获取对应情绪的维度
+        dimensions = AI_MOOD_TO_VAD.get(mood, AI_MOOD_TO_VAD[AIMood.CONTENT])
+
         history_entry = MoodHistoryEntry(
             mood=mood,
             intensity=intensity,
             trigger=trigger,
+            dimensions=dimensions,
             timestamp=datetime.now(),
         )
 
         state.mood_history.append(history_entry)
         state.current_mood = mood
         state.mood_intensity = intensity
+        state.dimensions = dimensions
         state.last_updated = datetime.now()
 
         logger.info(f"AI mood manually set for user {user_id}: {mood.value}")
@@ -232,7 +323,10 @@ class AIEmotionManager:
         else:
             intensity_desc = ""
 
-        return f"【当前心情】{description}{intensity_desc}"
+        # 添加维度描述
+        dim_desc = state.dimensions.describe()
+
+        return f"【当前心情】{description}{intensity_desc}（{dim_desc}）"
 
     def get_mood_stats(self, user_id: int) -> Dict[str, Any]:
         """Get mood statistics for monitoring.
@@ -260,6 +354,12 @@ class AIEmotionManager:
             "user_id": user_id,
             "current_mood": state.current_mood.value,
             "mood_intensity": state.mood_intensity,
+            "dimensions": {
+                "valence": state.dimensions.valence,
+                "arousal": state.dimensions.arousal,
+                "dominance": state.dimensions.dominance,
+                "description": state.dimensions.describe(),
+            },
             "last_updated": state.last_updated.isoformat(),
             "history_count": len(state.mood_history),
             "mood_distribution": mood_counts,
@@ -289,6 +389,11 @@ class AIEmotionManager:
                 "intensity": entry.intensity,
                 "trigger": entry.trigger,
                 "user_emotion": entry.user_emotion.value if entry.user_emotion else None,
+                "dimensions": {
+                    "valence": entry.dimensions.valence,
+                    "arousal": entry.dimensions.arousal,
+                    "dominance": entry.dimensions.dominance,
+                } if entry.dimensions else None,
                 "timestamp": entry.timestamp.isoformat(),
             }
             for entry in reversed(recent)  # Most recent first

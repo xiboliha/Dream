@@ -395,6 +395,78 @@
         .mood-shy { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); }
         .mood-excited { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
 
+        /* 情绪维度显示 */
+        .dimensions-display {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+
+        .dimension-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .dimension-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .dimension-label {
+            width: 80px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .dimension-bar {
+            flex: 1;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dimension-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .dimension-fill.valence-positive {
+            background: linear-gradient(90deg, #a8e6cf, #56ab2f);
+        }
+
+        .dimension-fill.valence-negative {
+            background: linear-gradient(90deg, #ff6b6b, #ee5a24);
+        }
+
+        .dimension-fill.arousal {
+            background: linear-gradient(90deg, #74b9ff, #0984e3);
+        }
+
+        .dimension-fill.dominance {
+            background: linear-gradient(90deg, #fdcb6e, #f39c12);
+        }
+
+        .dimension-value {
+            width: 50px;
+            text-align: right;
+            font-size: 12px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        .dimension-desc {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #e8e8ff;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #667eea;
+        }
+
         .loading {
             text-align: center;
             padding: 40px;
@@ -630,6 +702,11 @@
             const container = document.getElementById('currentState');
             const mood = state.current_mood;
             const intensity = state.mood_intensity;
+            const dims = state.dimensions || {valence: 0, arousal: 0.5, dominance: 0.5};
+
+            // 计算效价的显示（-1到1转换为百分比）
+            const valencePercent = ((dims.valence + 1) / 2) * 100;
+            const valenceClass = dims.valence >= 0 ? 'valence-positive' : 'valence-negative';
 
             container.innerHTML = `
                 <div class="mood-icon mood-${mood}">
@@ -640,6 +717,30 @@
                     <p>强度: ${(intensity * 100).toFixed(0)}%</p>
                     <div class="intensity-bar">
                         <div class="intensity-fill" style="width: ${intensity * 100}%"></div>
+                    </div>
+                    <div class="dimensions-display">
+                        <div class="dimension-item">
+                            <span class="dimension-label">效价 V</span>
+                            <div class="dimension-bar">
+                                <div class="dimension-fill ${valenceClass}" style="width: ${valencePercent}%"></div>
+                            </div>
+                            <span class="dimension-value">${dims.valence.toFixed(2)}</span>
+                        </div>
+                        <div class="dimension-item">
+                            <span class="dimension-label">唤醒度 A</span>
+                            <div class="dimension-bar">
+                                <div class="dimension-fill arousal" style="width: ${dims.arousal * 100}%"></div>
+                            </div>
+                            <span class="dimension-value">${dims.arousal.toFixed(2)}</span>
+                        </div>
+                        <div class="dimension-item">
+                            <span class="dimension-label">支配感 D</span>
+                            <div class="dimension-bar">
+                                <div class="dimension-fill dominance" style="width: ${dims.dominance * 100}%"></div>
+                            </div>
+                            <span class="dimension-value">${dims.dominance.toFixed(2)}</span>
+                        </div>
+                        ${dims.description ? `<div class="dimension-desc">${dims.description}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -675,6 +776,11 @@
 
             container.innerHTML = history.map(item => {
                 const time = new Date(item.timestamp);
+                const dims = item.dimensions;
+                let dimsHtml = '';
+                if (dims) {
+                    dimsHtml = `<p style="color:#888;font-size:11px;">V:${dims.valence.toFixed(2)} A:${dims.arousal.toFixed(2)} D:${dims.dominance.toFixed(2)}</p>`;
+                }
                 return `
                     <div class="history-item">
                         <div class="history-mood mood-${item.mood}">
@@ -684,6 +790,7 @@
                             <h4>${MOOD_NAMES[item.mood] || item.mood} (${(item.intensity * 100).toFixed(0)}%)</h4>
                             <p>${item.trigger || '无触发原因'}</p>
                             ${item.user_emotion ? `<p style="color:#667eea">用户情绪: ${item.user_emotion}</p>` : ''}
+                            ${dimsHtml}
                         </div>
                         <div class="history-time">
                             ${time.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})}

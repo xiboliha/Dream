@@ -180,20 +180,53 @@
             }
         }
 
+        // Track pending request for message buffering
+        let pendingRequest = null;
+        let isWaitingResponse = false;
+
         async function sendMessage() {
             const msg = messageInput.value.trim();
             if (!msg) return;
             addMessage(msg, true);
             messageInput.value = '';
             typingIndicator.classList.add('show');
-            sendBtn.disabled = true;
+
+            // Don't disable button - allow user to send more messages
+            // sendBtn.disabled = true;
+
+            // Send request without blocking UI
+            const requestPromise = fetch(API_BASE + '/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: USER_ID, message: msg})
+            });
+
+            // If there's already a pending request, this message will be buffered
+            // Just let the first request handle the response
+            if (isWaitingResponse) {
+                // This message is being buffered, don't wait for response
+                console.log('Message buffered, waiting for combined response...');
+                // Still send the request but don't process response here
+                requestPromise.catch(e => console.error('Buffered message error:', e));
+                messageInput.focus();
+                return;
+            }
+
+            // This is the first message, wait for response
+            isWaitingResponse = true;
+
             try {
-                const res = await fetch(API_BASE + '/chat', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({user_id: USER_ID, message: msg})
-                });
+                const res = await requestPromise;
                 const data = await res.json();
+
+                // Check if message is being buffered (subsequent message response)
+                if (data.buffering) {
+                    // This shouldn't happen for first message anymore
+                    // but keep for safety
+                    messageInput.focus();
+                    return;
+                }
+
                 // Wait for first message typing delay
                 await new Promise(r => setTimeout(r, Math.min(data.typing_delay * 1000, 2000)));
                 typingIndicator.classList.remove('show');
@@ -201,13 +234,20 @@
                 // Check if we have multiple messages
                 if (data.messages && data.messages.length > 1) {
                     await showMultipleMessages(data.messages);
-                } else {
+                } else if (data.response) {
                     addMessage(data.response, false);
+                }
+
+                // Show if messages were combined
+                if (data.buffered_count > 1) {
+                    console.log(`Combined ${data.buffered_count} messages into one response`);
                 }
             } catch(e) {
                 typingIndicator.classList.remove('show');
                 addMessage('网络出了点问题~', false);
             }
+
+            isWaitingResponse = false;
             sendBtn.disabled = false;
             messageInput.focus();
         }
