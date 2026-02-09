@@ -136,6 +136,156 @@ https://github.com/xiboliha/Dream
 
 ---
 
+## Git分支策略
+
+> 最后更新: 2026-02-09
+
+### 分支结构
+
+```
+main (生产分支)
+├── develop (开发主分支)
+│   ├── feature/context-optimization (P0: 对话上下文优化)
+│   ├── feature/memory-system (P0: 记忆系统优化)
+│   ├── feature/local-model (P1: 本地模型集成)
+│   ├── feature/image-understanding (P1: 图片理解)
+│   ├── feature/search-cache (P1: 搜索缓存)
+│   └── feature/voice-support (P2: 语音支持)
+├── hotfix/* (紧急修复)
+└── release/* (发布分支)
+```
+
+### 分支说明
+
+| 分支类型 | 命名规则 | 用途 | 合并目标 | 负责人建议 |
+|---------|---------|------|---------|-----------|
+| `main` | - | 生产环境代码，始终可部署 | - | 项目负责人 |
+| `develop` | - | 开发主分支，集成所有功能 | main | 技术负责人 |
+| `feature/*` | feature/功能名 | 新功能开发 | develop | 功能开发者 |
+| `hotfix/*` | hotfix/问题描述 | 紧急修复 | main + develop | 值班开发者 |
+| `release/*` | release/v版本号 | 发布准备 | main + develop | 发布负责人 |
+
+### 工作流程
+
+#### 1. 功能开发流程
+
+```bash
+# 1. 从develop创建功能分支
+git checkout develop
+git pull origin develop
+git checkout -b feature/your-feature
+
+# 2. 开发并提交
+git add .
+git commit -m "feat: 功能描述"
+
+# 3. 推送到远程
+git push origin feature/your-feature
+
+# 4. 创建Pull Request到develop
+# 5. Code Review通过后合并
+# 6. 删除功能分支
+git branch -d feature/your-feature
+```
+
+#### 2. 紧急修复流程
+
+```bash
+# 1. 从main创建hotfix分支
+git checkout main
+git pull origin main
+git checkout -b hotfix/bug-description
+
+# 2. 修复并提交
+git add .
+git commit -m "fix: 修复描述"
+
+# 3. 合并到main和develop
+git checkout main
+git merge hotfix/bug-description
+git checkout develop
+git merge hotfix/bug-description
+
+# 4. 推送并删除分支
+git push origin main develop
+git branch -d hotfix/bug-description
+```
+
+#### 3. 发布流程
+
+```bash
+# 1. 从develop创建release分支
+git checkout develop
+git checkout -b release/v1.0.0
+
+# 2. 版本号更新、测试、bug修复
+git commit -m "chore: 准备v1.0.0发布"
+
+# 3. 合并到main并打标签
+git checkout main
+git merge release/v1.0.0
+git tag -a v1.0.0 -m "Release v1.0.0"
+
+# 4. 合并回develop
+git checkout develop
+git merge release/v1.0.0
+
+# 5. 推送
+git push origin main develop --tags
+git branch -d release/v1.0.0
+```
+
+### 当前功能分支分配建议
+
+| 分支 | 优先级 | 功能 | 建议负责人 | 预计工期 |
+|------|-------|------|-----------|---------|
+| `feature/context-optimization` | P0 | 对话上下文理解优化 | 对话系统开发者 | 1-2周 |
+| `feature/memory-system` | P0 | 记忆系统优化 | AI集成开发者 | 1-2周 |
+| `feature/local-model` | P1 | 本地模型集成 | 模型工程师 | 2-3周 |
+| `feature/image-understanding` | P1 | 图片理解能力 | 多模态开发者 | 2-3周 |
+| `feature/search-cache` | P1 | 搜索结果缓存 | 后端开发者 | 1周 |
+| `feature/voice-support` | P2 | 语音消息支持 | 音频处理开发者 | 3-4周 |
+
+### 分支保护规则建议
+
+#### main分支
+- 禁止直接push
+- 需要至少1人Code Review
+- 需要通过CI/CD测试
+- 需要项目负责人批准
+
+#### develop分支
+- 禁止直接push
+- 需要至少1人Code Review
+- 需要通过单元测试
+
+#### feature分支
+- 允许开发者自由提交
+- 合并前需要Code Review
+
+### 提交信息规范
+
+```
+<type>: <subject>
+
+<body>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+**Type类型:**
+- `feat`: 新功能
+- `fix`: Bug修复
+- `docs`: 文档更新
+- `style`: 代码格式调整
+- `refactor`: 重构
+- `test`: 测试相关
+- `chore`: 构建/工具链更新
+
+---
+
 ## 开发日志
 
 ### 2026-01-30 会话记录
@@ -495,3 +645,62 @@ https://github.com/xiboliha/Dream
 | `SearchServiceError` | 503 | SEARCH_SERVICE_ERROR | 搜索服务不可用 |
 | `ServiceUnavailableError` | 503 | SERVICE_UNAVAILABLE | 服务未初始化 |
 | `ValidationError` | 400 | VALIDATION_ERROR | 输入验证失败 |
+
+### 2026-02-09 会话记录
+
+#### 主要完成工作
+
+1. **Git分支策略制定**
+   - 采用Git Flow工作流
+   - 创建 `develop` 开发主分支
+   - 根据TODO清单创建6个功能分支
+   - 制定分支保护规则和工作流程
+
+2. **功能分支创建**
+   - `feature/context-optimization` - P0: 对话上下文理解优化
+   - `feature/memory-system` - P0: 记忆系统优化
+   - `feature/local-model` - P1: 本地模型集成
+   - `feature/image-understanding` - P1: 图片理解能力
+   - `feature/search-cache` - P1: 搜索结果缓存
+   - `feature/voice-support` - P2: 语音消息支持
+
+3. **团队协作规范**
+   - 定义分支命名规则
+   - 制定提交信息规范
+   - 建议分支负责人和预计工期
+   - 添加Code Review流程
+
+4. **文档更新**
+   - 在 `cclogs/claude.md` 添加"Git分支策略"章节
+   - 包含分支结构、工作流程、分支保护规则
+   - 添加功能分支分配建议表格
+
+#### 关键文件修改
+
+- `cclogs/claude.md` - 新增Git分支策略章节
+
+#### 分支结构
+
+```
+main (生产分支)
+├── develop (开发主分支)
+│   ├── feature/context-optimization
+│   ├── feature/memory-system
+│   ├── feature/local-model
+│   ├── feature/image-understanding
+│   ├── feature/search-cache
+│   └── feature/voice-support
+├── hotfix/* (紧急修复)
+└── release/* (发布分支)
+```
+
+#### 团队开发建议
+
+| 分支 | 优先级 | 建议负责人 | 预计工期 |
+|------|-------|-----------|---------|
+| feature/context-optimization | P0 | 对话系统开发者 | 1-2周 |
+| feature/memory-system | P0 | AI集成开发者 | 1-2周 |
+| feature/local-model | P1 | 模型工程师 | 2-3周 |
+| feature/image-understanding | P1 | 多模态开发者 | 2-3周 |
+| feature/search-cache | P1 | 后端开发者 | 1周 |
+| feature/voice-support | P2 | 音频处理开发者 | 3-4周 |
