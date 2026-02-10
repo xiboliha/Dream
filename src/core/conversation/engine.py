@@ -24,6 +24,7 @@ from src.services.knowledge import DialogueKnowledgeBase
 from src.services.tools import WeatherTool, WebSearchTool
 from src.services.emotion import get_emotion_analyzer, get_ai_emotion_manager, EmotionResult
 from src.utils.helpers import generate_session_id, get_time_greeting, calculate_typing_delay
+from src.core.conversation.context_analyzer import ContextAnalyzer
 
 
 class ConversationEngine:
@@ -80,6 +81,9 @@ class ConversationEngine:
         # Initialize emotion services
         self.emotion_analyzer = get_emotion_analyzer()
         self.ai_emotion_manager = get_ai_emotion_manager()
+
+        # Initialize context analyzer
+        self.context_analyzer = ContextAnalyzer()
 
     def _filter_response(self, content: str) -> str:
         """Filter out kaomoji, excessive emoji, and model thinking process from response."""
@@ -440,7 +444,7 @@ class ConversationEngine:
         conversation: Conversation,
         user_message: str,
     ) -> ConversationContext:
-        """Build conversation context for AI.
+        """Build conversation context for AI with intelligent selection.
 
         Args:
             session: Database session
@@ -450,21 +454,39 @@ class ConversationEngine:
         Returns:
             ConversationContext with all relevant information
         """
-        # Get message history
+        # Get message history (fetch more than needed for intelligent selection)
         history = await self.get_conversation_history(
-            session, conversation, limit=self.max_context_messages
+            session, conversation, limit=self.max_context_messages * 2
         )
 
-        # Convert to schemas
+        # Convert to dict format for context analyzer
+        history_dicts = [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.created_at,
+            }
+            for msg in history
+        ]
+
+        # Use context analyzer to select most relevant messages
+        selected_messages = self.context_analyzer.select_relevant_context(
+            messages=history_dicts,
+            current_message=user_message,
+            max_messages=self.max_context_messages,
+            max_tokens=2000,
+        )
+
+        # Convert selected messages to schemas
         messages = [
             MessageSchema(
-                user_id=msg.user_id,
-                role=msg.role,
-                content=msg.content,
-                message_type=msg.message_type,
-                created_at=msg.created_at,
+                user_id=conversation.user_id,
+                role=msg["role"],
+                content=msg["content"],
+                message_type=MessageType.TEXT.value,
+                created_at=msg["timestamp"],
             )
-            for msg in history
+            for msg in selected_messages
         ]
 
         # Get user memory profile
@@ -472,9 +494,13 @@ class ConversationEngine:
             session, conversation.user_id
         )
 
+        # Analyze context dependency to determine how many memories to fetch
+        context_dependency = self.context_analyzer.analyze_context_dependency(user_message)
+        memory_limit = 10 if context_dependency > 0.6 else 5
+
         # Search for relevant memories based on current message
         relevant_memories = await self.memory_manager.search_memories(
-            session, conversation.user_id, user_message, limit=5
+            session, conversation.user_id, user_message, limit=memory_limit
         )
 
         context = ConversationContext(
@@ -529,14 +555,29 @@ class ConversationEngine:
                 for m in context.relevant_memories[:5]
             ])
 
-        # Format conversation context
+        # Format conversation context with better structure
         conversation_context_text = ""
         if context.messages:
-            recent = context.messages[-5:]
-            conversation_context_text = "\n".join([
-                f"{m.role}: {m.content[:100]}..."
-                for m in recent
-            ])
+            # Use context analyzer to build a better summary
+            messages_dict = [
+                {"role": m.role, "content": m.content}
+                for m in context.messages
+            ]
+            conversation_context_text = self.context_analyzer.build_context_summary(
+                messages_dict, max_length=800
+            )
+
+            # Detect if current message references previous messages
+            if len(context.messages) > 0:
+                previous_contents = [m.content for m in context.messages[-5:]]
+                previous_contents.reverse()  # Most recent first
+                ref_idx = self.context_analyzer.detect_reference_to_previous(
+                    user_message, previous_contents
+                )
+                if ref_idx is not None and ref_idx < len(previous_contents):
+                    # Add explicit reference context
+                    referenced_msg = previous_contents[ref_idx]
+                    conversation_context_text += f"\n\n【重要】用户当前消息可能在回应: \"{referenced_msg}\""
 
         # Build prompt
         prompt = self._system_prompt.format(
