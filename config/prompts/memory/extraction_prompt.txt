@@ -1,12 +1,30 @@
-任务：从对话提取用户信息，只输出JSON。
+任务：从对话提取用户信息，输出严格的JSON格式。
 
-对话：
+对话内容：
 {conversation}
 
-规则：
-1. 只提取user说的信息，忽略assistant的话
-2. type只能是：用户基本信息、用户偏好、用户厌恶、重要事件、关系信息、生活习惯
-3. importance：姓名/年龄/职业=0.9，喜好/厌恶=0.7，日常闲聊=0.5
-4. 无有价值信息时extracted_info为空数组
+提取规则：
+1. **只提取user说的信息**，完全忽略assistant的话
+2. **type必须是以下之一**：用户基本信息、用户偏好、用户厌恶、重要事件、关系信息、生活习惯
+3. **importance评分标准**：
+   - 姓名/年龄/职业/住址 = 0.9
+   - 喜好/厌恶/习惯 = 0.7
+   - 日常闲聊/临时状态 = 0.5
+4. **如果没有有价值的信息，extracted_info必须是空数组[]**
 
-输出JSON（不要```，不要解释）：
+输出格式示例：
+{{
+  "extracted_info": [
+    {{"type": "用户基本信息", "content": "用户叫张三", "importance": 0.9}},
+    {{"type": "用户偏好", "content": "喜欢吃火锅", "importance": 0.7}}
+  ],
+  "emotional_state": {{"primary_emotion": "neutral", "intensity": 0.5}}
+}}
+
+**重要**：
+- 直接输出JSON，不要任何解释
+- 不要使用markdown代码块（不要```）
+- 确保JSON格式正确，注意逗号和引号
+- extracted_info必须是数组，即使为空也要写[]
+
+现在输出JSON：
