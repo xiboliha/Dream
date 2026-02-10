@@ -94,8 +94,9 @@ class MemoryManager:
         try:
             response = await self.ai_service.simple_chat(
                 user_message=prompt,
-                system_prompt="直接输出JSON，不要任何解释或markdown格式。",
+                system_prompt="你是一个JSON提取器。只输出有效的JSON格式，不要任何解释、不要markdown代码块、不要额外文字。",
                 temperature=0.1,
+                max_tokens=800,
             )
 
             # Parse JSON response
@@ -147,6 +148,7 @@ class MemoryManager:
             return None
 
         json_str = None
+        original_response = response
 
         try:
             # 方法1: 直接解析整个响应
@@ -157,16 +159,27 @@ class MemoryManager:
             pass
 
         try:
-            # 方法2: 找 ```json ... ``` 代码块
+            # 方法2: 找 ```json ... ``` 或 ``` ... ``` 代码块
             json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
             if json_match:
                 json_str = json_match.group(1).strip()
             else:
-                # 方法3: 找 { ... } 结构
+                # 方法3: 找 { ... } 结构（支持嵌套）
                 start = response.find("{")
-                end = response.rfind("}") + 1
-                if start >= 0 and end > start:
-                    json_str = response[start:end]
+                if start >= 0:
+                    # 找到匹配的右括号
+                    brace_count = 0
+                    end = start
+                    for i in range(start, len(response)):
+                        if response[i] == '{':
+                            brace_count += 1
+                        elif response[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end = i + 1
+                                break
+                    if end > start:
+                        json_str = response[start:end]
 
             if not json_str:
                 logger.debug("No JSON structure found in response")
@@ -176,6 +189,14 @@ class MemoryManager:
             json_str = re.sub(r',\s*}', '}', json_str)  # 移除}前的逗号
             json_str = re.sub(r',\s*]', ']', json_str)  # 移除]前的逗号
             json_str = re.sub(r'[\x00-\x09\x0b\x0c\x0e-\x1f]+', ' ', json_str)  # 移除控制字符
+
+            # 修复常见的引号问题
+            json_str = json_str.replace("'", '"')  # 单引号转双引号
+
+            # 移除注释
+            json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
+            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+
             json_str = json_str.strip()
 
             result = json.loads(json_str)
@@ -184,20 +205,43 @@ class MemoryManager:
 
         except json.JSONDecodeError as e:
             logger.debug(f"JSON parse error: {e}")
-            # 方法4: 更激进的清理
+            # 方法4: 尝试修复常见的JSON错误
             if json_str:
                 try:
+                    # 移除多余的空白
                     json_str_clean = re.sub(r'\s+', ' ', json_str)
+                    # 尝试修复缺失的引号
+                    json_str_clean = re.sub(r'(\w+):', r'"\1":', json_str_clean)
                     result = json.loads(json_str_clean)
                     if isinstance(result, dict):
                         return self._validate_extraction_result(result)
                 except:
                     pass
-            logger.debug(f"Response was: {response[:200]}")
+
+            # 方法5: 尝试提取部分有效的JSON
+            try:
+                # 查找所有可能的JSON对象
+                json_objects = re.findall(r'\{[^{}]*\}', original_response)
+                for obj_str in json_objects:
+                    try:
+                        result = json.loads(obj_str)
+                        if isinstance(result, dict) and 'extracted_info' in result:
+                            return self._validate_extraction_result(result)
+                    except:
+                        continue
+            except:
+                pass
+
+            logger.debug(f"All parsing attempts failed. Response was: {original_response[:300]}")
         except Exception as e:
             logger.debug(f"Unexpected error parsing extraction response: {e}")
 
-        return None
+        # 如果所有方法都失败，返回空结果而不是None
+        logger.warning(f"Failed to parse memory extraction response, returning empty result")
+        return {
+            "extracted_info": [],
+            "emotional_state": {"primary_emotion": "neutral", "intensity": 0.5}
+        }
 
     def _validate_extraction_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and normalize extraction result."""
