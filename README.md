@@ -1,29 +1,31 @@
-# AI Girlfriend Agent
+# AI Girlfriend Agent (Nuyoah)
 
-基于微信的AI女友聊天机器人，具备记忆学习、人格演化和情感智能能力。
+基于 FastAPI 的 AI 女友聊天机器人系统，具备智能对话、记忆学习、情感分析和 RAG 向量检索能力。
 
 ## 功能特性
 
-- **记忆学习系统**: 从对话中学习用户特征，建立长期记忆
-- **人格演化**: 基于用户互动动态调整人格特质
-- **情感智能**: 识别和适应用户情感状态
-- **关系系统**: 亲密度追踪，关系阶段演进
-- **多AI支持**: 支持OpenAI、通义千问等多种AI服务
-- **多接口**: 支持微信、CLI命令行、REST API三种接口
+- **智能对话系统**: 基于 glm-4.7 模型的自然对话，支持上下文理解和反转识别
+- **RAG 向量检索**: 使用 Qdrant 向量数据库，支持百万级对话检索增强
+- **记忆学习系统**: 短期记忆（对话上下文）+ 长期记忆（用户信息提取与存储）
+- **情感智能**: AI 情绪状态追踪，根据用户情绪动态调整回复风格
+- **主动消息系统**: 定时问候、空闲检测，模拟真人聊天体验
+- **监控系统**: 实时日志查看、对话记录统计、错误追踪
+- **Web 界面**: 现代化聊天界面和监控面板
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.9+
-- Redis (可选，用于缓存，不安装会使用内存缓存)
+- Docker (用于运行 Qdrant)
+- Redis (可选，用于缓存)
 
 ### 安装
 
 ```bash
 # 克隆项目
-git clone <repository-url>
-cd ai-girlfriend-agent
+git clone https://github.com/xiboliha/Dream.git
+cd Dream
 
 # 创建虚拟环境
 python -m venv .venv
@@ -48,197 +50,222 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-2. 编辑 `.env` 文件，配置必要的API密钥：
+2. 编辑 `.env` 文件，配置必要的 API 密钥：
 ```ini
-# 选择AI服务提供商 (openai 或 qianwen)
+# AI 服务提供商
 AI_PROVIDER=qianwen
+AI_MODEL=glm-4.7
 
-# 通义千问配置 (推荐国内用户使用)
-QIANWEN_API_KEY=sk-your-qianwen-api-key
+# 阿里云百炼 API
+DASHSCOPE_API_KEY=your_api_key_here
 
-# 或者使用 OpenAI
-# AI_PROVIDER=openai
-# OPENAI_API_KEY=sk-your-openai-api-key
+# RAG 向量数据库
+RAG_BACKEND=qdrant
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+QDRANT_COLLECTION=dialogues
+
+# Redis (可选)
+REDIS_HOST=localhost
+REDIS_PORT=6379
 ```
 
-### 运行
+### 启动服务
 
-项目提供三种运行模式：
-
-#### 1. 微信模式 (默认)
+1. **启动 Qdrant 向量数据库**：
 ```bash
-# Windows:
-run.bat wechat
-# 或直接:
-python src/main.py
-
-# Linux/Mac:
-./run.sh wechat
+docker run -d -p 6333:6333 -p 6334:6334 \
+  --name qdrant \
+  docker.m.daocloud.io/qdrant/qdrant:latest
 ```
-首次运行会显示微信登录二维码，使用微信扫码登录即可。
 
-#### 2. CLI命令行模式 (测试用)
+2. **启动 FastAPI 服务**：
 ```bash
-# Windows:
-run.bat cli
-# 或:
-python src/interfaces/cli/shell.py
-
-# Linux/Mac:
-./run.sh cli
+python -m uvicorn src.app:app --host 127.0.0.1 --port 8000 --reload
 ```
-无需微信，直接在命令行中与AI对话，适合开发测试。
 
-#### 3. REST API模式
-```bash
-# Windows:
-run.bat api
-# 或:
-python -m uvicorn src.app:app --host 0.0.0.0 --port 8000
-
-# Linux/Mac:
-./run.sh api
-```
-启动后访问 http://localhost:8000/docs 查看API文档。
-
-### 初始化设置
-```bash
-# Windows:
-run.bat setup
-# Linux/Mac:
-./run.sh setup
-```
+3. **访问应用**：
+- 聊天页面: http://127.0.0.1:8000
+- 监控页面: http://127.0.0.1:8000/monitor
+- 情绪监控: http://127.0.0.1:8000/emotion-monitor
+- API 文档: http://127.0.0.1:8000/docs
 
 ## 项目结构
 
 ```
-ai-girlfriend-agent/
+aigf/
 ├── config/                     # 配置文件
 │   ├── settings.py            # 主配置
-│   ├── personalities/         # 人格配置 (YAML)
-│   │   ├── gentle_caring.yaml # 温柔体贴型
-│   │   ├── lively_cute.yaml   # 活泼可爱型
-│   │   └── intellectual.yaml  # 知性优雅型
-│   ├── prompts/               # 提示词模板
-│   │   ├── system/           # 系统提示词
-│   │   └── memory/           # 记忆提取提示词
-│   └── security/              # 安全配置
-│       ├── filters.yaml      # 内容过滤规则
-│       └── rate_limits.yaml  # 频率限制
-├── src/                        # 源代码
-│   ├── main.py                # 微信模式入口
-│   ├── app.py                 # FastAPI应用
-│   ├── interfaces/            # 接口层
-│   │   ├── wechat/           # 微信接口
-│   │   ├── cli/              # 命令行接口
-│   │   └── web/              # Web接口 (预留)
-│   ├── services/              # 服务层
-│   │   ├── ai/               # AI服务 (OpenAI/千问)
-│   │   ├── memory/           # 记忆服务
-│   │   ├── emotion/          # 情感分析
-│   │   ├── scheduler/        # 定时任务
-│   │   └── storage/          # 存储服务
+│   ├── knowledge/             # 知识库
+│   │   ├── dialogue_dataset.json    # RAG对话数据集
+│   │   └── dialogue_examples.json   # 对话示例
+│   ├── personalities/         # 人格配置
+│   │   ├── gentle_caring.yaml      # 温柔体贴
+│   │   ├── intellectual.yaml       # 知性优雅
+│   │   └── lively_cute.yaml        # 活泼可爱
+│   └── prompts/               # 提示词
+│       ├── system/base_prompt.txt  # 系统提示词
+│       └── memory/            # 记忆提取提示词
+├── src/
+│   ├── app.py                 # FastAPI主应用
 │   ├── core/                  # 核心模块
-│   │   ├── conversation/     # 对话引擎
-│   │   ├── personality/      # 人格系统
-│   │   ├── relationship/     # 关系系统
-│   │   ├── security/         # 安全过滤
-│   │   └── coordinator/      # 主控调度
-│   ├── models/                # 数据模型
-│   └── utils/                 # 工具类
-├── data/                       # 数据目录
-│   ├── database/             # SQLite数据库
-│   ├── cache/                # 缓存文件
-│   └── logs/                 # 日志文件
-├── tests/                      # 测试
-│   ├── unit/                 # 单元测试
-│   └── integration/          # 集成测试
-├── docker/                     # Docker配置
-├── requirements/               # 依赖管理
-│   ├── base.txt              # 基础依赖
-│   ├── dev.txt               # 开发依赖
-│   └── prod.txt              # 生产依赖
-├── run.bat                     # Windows启动脚本
-├── run.sh                      # Linux/Mac启动脚本
-└── pyproject.toml              # 项目配置
+│   │   ├── conversation/      # 对话引擎
+│   │   │   ├── engine.py           # 对话引擎
+│   │   │   └── context_analyzer.py # 上下文分析器
+│   │   ├── personality/       # 人格系统
+│   │   └── relationship/      # 关系构建
+│   ├── services/              # 服务层
+│   │   ├── ai/               # AI服务
+│   │   │   ├── qianwen_service.py  # 阿里云百炼
+│   │   │   └── embedding_service.py # 嵌入服务
+│   │   ├── knowledge/        # 知识服务
+│   │   │   ├── rag_service.py     # RAG服务
+│   │   │   ├── qdrant_store.py    # Qdrant存储
+│   │   │   └── vector_store.py    # FAISS存储
+│   │   ├── memory/           # 记忆管理
+│   │   ├── emotion/          # 情绪分析
+│   │   │   ├── analyzer.py        # 情绪分析器
+│   │   │   └── ai_emotion_state.py # AI情绪状态
+│   │   ├── proactive/        # 主动消息
+│   │   ├── tools/            # 工具服务
+│   │   │   └── search.py          # 网络搜索
+│   │   └── storage/          # 存储服务
+│   ├── interfaces/           # 接口层
+│   │   └── web/
+│   │       ├── chat.html     # 聊天页面
+│   │       ├── monitor.html  # 监控页面
+│   │       ├── emotion_monitor.html # 情绪监控
+│   │       └── assets/       # 静态资源
+│   └── utils/                # 工具类
+│       ├── logger.py         # 日志系统
+│       └── exceptions.py     # 异常处理
+├── data/                     # 数据目录
+│   ├── database/            # SQLite数据库
+│   ├── logs/                # 日志文件
+│   └── vector_store/        # 向量索引
+├── tests/                    # 测试
+│   ├── unit/                # 单元测试
+│   └── integration/         # 集成测试
+├── cclogs/                   # 开发日志
+│   └── claude.md            # 项目文档和开发记录
+├── .env                     # 环境变量 (不提交)
+├── .env.example             # 环境变量示例
+└── requirements/            # 依赖文件
+    ├── base.txt            # 基础依赖
+    ├── dev.txt             # 开发依赖
+    └── prod.txt            # 生产依赖
 ```
 
 ## 核心模块详解
 
-### 1. 记忆系统
+### 1. 智能对话系统
 
-记忆系统是本项目的核心，分为三层：
+**上下文分析器 (ContextAnalyzer)**：
+- 分析消息对上下文的依赖程度
+- 计算消息重要性评分
+- 检测话题变化
+- 智能选择相关上下文
+- 检测对历史消息的引用
 
-- **短期记忆**: 保存最近20条对话上下文，用于维持对话连贯性
-- **长期记忆**: 固化重要信息（用户姓名、偏好、重要事件等）
-- **记忆固化**: AI自动评估短期记忆的重要性，将重要信息转为长期记忆
+**对话引擎 (ConversationEngine)**：
+- 动态调整上下文窗口大小
+- 集成 RAG 向量检索增强回复
+- 支持多条消息连发（模拟真人聊天）
+- 情绪感知和反转理解
 
-记忆类型：
+### 2. 记忆系统
+
+记忆系统分为两层：
+
+- **短期记忆**: 保存最近对话上下文，维持对话连贯性
+- **长期记忆**: 自动提取并固化重要信息（用户姓名、偏好、重要事件等）
+
+**记忆类型**：
 - `fact`: 事实信息（姓名、年龄、职业等）
 - `preference`: 偏好信息（喜欢/不喜欢的事物）
 - `event`: 事件记忆（重要日期、经历）
 - `relationship`: 关系信息（家人、朋友）
 - `emotion`: 情感记忆
+- `habit`: 习惯信息
 
-### 2. 人格系统
+**JSON 解析容错**：
+- 7 层 fallback 解析策略
+- 智能括号匹配
+- 自动修复常见格式问题
+- 记忆提取成功率 90%+
 
-预设三种人格类型，每种人格有不同的特质配置：
+### 3. RAG 向量检索
 
-| 人格类型 | 特点 | 适合场景 |
-|---------|------|---------|
-| 温柔体贴 (gentle_caring) | 高共情、高耐心、善于安慰 | 需要情感支持时 |
-| 活泼可爱 (lively_cute) | 高活力、爱用表情、幽默 | 日常闲聊、娱乐 |
-| 知性优雅 (intellectual) | 理性、有深度、善于分析 | 讨论问题、求建议 |
+**Qdrant 向量数据库**：
+- 支持百万级对话存储
+- 相似对话检索增强回复质量
+- 自动向量化和索引
+- 支持语义搜索
 
-人格会根据用户互动逐渐演化适配用户的沟通风格。
+**检索策略**：
+- 根据用户消息检索相似对话
+- 动态调整检索数量（5-10 条）
+- 结合上下文依赖度优化检索
 
-### 3. 关系系统
+### 4. 情感智能
 
-关系分为6个阶段，随着互动逐渐升级：
+**情绪分析 (EmotionAnalyzer)**：
+- 识别用户情绪（开心、难过、生气、焦虑等）
+- 分析情绪强度
+- 检测情绪变化
 
-1. **陌生人** (0-10): 正式称呼，保持距离
-2. **熟人** (10-30): 开始熟悉
-3. **朋友** (30-50): 可以使用昵称
-4. **好朋友** (50-70): 主动关心
-5. **挚友** (70-90): 深度信任
-6. **灵魂伴侣** (90-100): 完全默契
+**AI 情绪状态 (AIEmotionState)**：
+- 9 种 AI 情绪状态：happy, content, caring, playful, worried, sad, annoyed, shy, excited
+- 根据用户情绪动态调整 AI 情绪
+- 情绪影响回复风格和语气
+- 情绪强度追踪和衰减机制
 
-### 4. 情感分析
+### 5. 主动消息系统
 
-自动识别用户情绪并调整回应方式：
-- 开心时一起分享喜悦
-- 难过时给予安慰陪伴
-- 焦虑时提供理性分析
-- 愤怒时帮助平复情绪
+**定时问候**：
+- 08:00 早安
+- 12:00 午饭提醒
+- 14:00 午睡结束
+- 18:00 晚饭提醒
+- 22:00 晚安
 
-### 5. 安全机制
+**空闲检测**：
+- 30 分钟无回复时主动发消息
+- 防止消息轰炸（最小间隔控制）
+- 多种空闲提醒模板
 
-- **内容过滤**: 过滤敏感话题，保护用户
-- **频率限制**: 防止滥用
-- **心理健康保护**: 检测危机关键词，提供求助资源
-- **AI身份提醒**: 定期提醒用户这是AI
+### 6. 网络搜索
 
-## API接口
+**必应搜索集成**：
+- 关键词触发搜索（"搜一下"、"查一下"等）
+- 自动解析搜索结果
+- 搜索结果注入 AI 上下文
+- 生成自然回复
 
-启动API模式后，主要接口：
+## API 接口
+
+主要接口：
 
 | 接口 | 方法 | 说明 |
 |-----|------|-----|
+| `/` | GET | 聊天页面 |
+| `/monitor` | GET | 监控页面 |
+| `/emotion-monitor` | GET | 情绪监控页面 |
 | `/health` | GET | 健康检查 |
 | `/chat` | POST | 发送消息 |
-| `/users/{id}/status` | GET | 获取用户关系状态 |
-| `/users/{id}/memories` | GET | 获取用户记忆 |
-| `/users/{id}/greeting` | POST | 获取问候语 |
-| `/personalities` | GET | 获取可用人格列表 |
+| `/logs` | GET | 获取日志 |
+| `/logs/chats` | GET | 对话记录 |
+| `/logs/errors` | GET | 错误日志 |
+| `/logs/stats` | GET | 统计信息 |
+| `/rag/dialogues` | POST | 添加对话到 RAG |
+| `/rag/search` | GET | 搜索对话 |
+| `/rag/stats` | GET | RAG 统计 |
+| `/emotion/state/{user_id}` | GET | 获取 AI 情绪状态 |
+| `/emotion/history/{user_id}` | GET | 获取情绪历史 |
+| `/users/{user_id}/proactive` | GET | 获取主动消息 |
+| `/users/{user_id}/activity` | POST | 更新用户活动 |
 
-详细文档访问: http://localhost:8000/docs
-
-## Docker部署
-
-```bash
-cd docker
-docker-compose up -d
-```
+详细文档访问: http://127.0.0.1:8000/docs
 
 ## 开发指南
 
@@ -259,41 +286,26 @@ pytest --cov=src tests/
 pytest tests/unit/
 ```
 
-### 代码格式化
-```bash
-# 格式化代码
-black src/
-isort src/
+### Git 工作流
 
-# 类型检查
-mypy src/
+项目采用 Git Flow 工作流：
+
+```
+main (生产分支)
+├── develop (开发主分支)
+│   ├── feature/context-optimization (上下文优化)
+│   ├── feature/memory-system (记忆系统)
+│   ├── feature/local-model (本地模型)
+│   ├── feature/image-understanding (图片理解)
+│   ├── feature/search-cache (搜索缓存)
+│   └── feature/voice-support (语音支持)
 ```
 
-### 添加新人格
-
-在 `config/personalities/` 目录下创建新的YAML文件：
-
-```yaml
-name: my_personality
-display_name: 我的人格
-description: 自定义人格描述
-
-traits:
-  warmth: 0.7
-  empathy: 0.8
-  playfulness: 0.5
-  # ... 其他特质
-
-language_style:
-  formality: 0.4
-  emoji_usage: 0.6
-  pet_names: true
-
-expressions:
-  greetings:
-    - "你好呀~"
-    - "嗨~"
-```
+**开发流程**：
+1. 从 `develop` 创建 feature 分支
+2. 在 feature 分支上开发
+3. 通过 Pull Request 合并到 `develop`
+4. 测试通过后合并到 `main`
 
 ## 注意事项
 
@@ -327,12 +339,22 @@ A: 目前只支持私聊，群聊功能在规划中。
 ## 技术栈
 
 - **后端框架**: FastAPI + Uvicorn
-- **微信接入**: itchat-uos
-- **AI服务**: OpenAI API / 阿里云DashScope
-- **数据库**: SQLAlchemy + SQLite/PostgreSQL
+- **AI 模型**: 阿里云百炼 (glm-4.7)
+- **向量数据库**: Qdrant
+- **嵌入模型**: text-embedding-v3 (DashScope)
+- **数据库**: SQLAlchemy + SQLite
 - **缓存**: Redis (可选)
 - **日志**: Loguru
 - **测试**: Pytest
+
+## 项目文档
+
+详细的开发日志和技术文档请查看：
+- [项目文档](cclogs/claude.md) - 完整的开发历程、功能说明和 API 文档
+
+## GitHub 仓库
+
+https://github.com/xiboliha/Dream
 
 ## 许可证
 
@@ -340,4 +362,11 @@ MIT License
 
 ## 贡献
 
-欢迎提交Issue和Pull Request！
+欢迎提交 Issue 和 Pull Request！
+
+开发流程：
+1. Fork 本仓库
+2. 创建 feature 分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'feat: 添加某个功能'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 创建 Pull Request
